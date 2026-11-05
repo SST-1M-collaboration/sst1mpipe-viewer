@@ -1,0 +1,101 @@
+import threading
+
+import numpy as np
+import pytest
+from astropy.table import Table
+from conftest import N_PIXELS, dl1_row, r1_row
+
+from sst1mpipe_viewer.store import ViewerStore
+
+
+def test_rows_of_an_event_are_merged(subarray):
+    store = ViewerStore(subarray)
+    store.push_row("r1", r1_row(1))
+    image = {k: v for k, v in dl1_row(1).items() if not k.startswith("hillas")}
+    parameters = {k: v for k, v in dl1_row(1).items() if k.startswith("hillas") or k in ("obs_id", "event_id")}
+    store.push_row("dl1", image)
+    store.push_row("dl1", parameters, tel_id=1)
+    event = store.event(1, (1, 1))
+    assert set(event) == {"r1", "dl1"}
+    assert "image" in event["dl1"] and "hillas_intensity" in event["dl1"]
+    assert store.latest_key(1, "dl1") == (1, 1)
+    assert store.counts()[(1, "dl1")] == 2
+
+
+def test_statistics_and_reset(subarray):
+    store = ViewerStore(subarray)
+    table = Table(rows=[dl1_row(i, intensity=10.0 * i) for i in range(1, 11)])
+    store.push_table("dl1", table)
+    snapshot = store.statistics(1)
+    assert snapshot["n_rows"] == 10
+    assert snapshot["n_selected"] == 5  # default cut hillas_intensity > 50
+    assert snapshot["accumulators"]["hillas_intensity"]["n_entries"] == 10  # no cuts on the intensity
+    assert snapshot["accumulators"]["hillas_length"]["n_entries"] == 5
+    assert np.allclose(snapshot["accumulators"]["image_mask_fraction"]["values"][:5], 1)
+    assert len(snapshot["accumulators"]["image_mask_fraction"]["values"]) == N_PIXELS
+
+    version = store.version
+    store.reset_statistics(1, "hillas_length")
+    assert store.statistics(1)["accumulators"]["hillas_length"]["n_entries"] == 0
+    assert store.statistics(1)["accumulators"]["hillas_width"]["n_entries"] == 5
+    store.reset_statistics()
+    assert store.statistics(1)["n_rows"] == 0
+    assert store.version > version
+
+
+def test_set_cuts(subarray):
+    store = ViewerStore(subarray)
+    with pytest.raises(ValueError):
+        store.set_cuts(["not a cut"])
+    store.set_cuts(["hillas_intensity > 15"])
+    store.push_table("dl1", Table(rows=[dl1_row(i, intensity=10.0 * i) for i in range(1, 4)]))
+    assert store.statistics(1)["n_selected"] == 2
+
+
+def test_invalid_input(subarray):
+    store = ViewerStore(subarray)
+    with pytest.raises(ValueError, match="Unknown kind"):
+        store.push_row("dl9", dl1_row(1))
+    with pytest.raises(ValueError, match="Missing columns"):
+        store.push_row("dl1", {"image": np.zeros(N_PIXELS)})
+
+
+def test_max_events_and_navigation(subarray):
+    store = ViewerStore(subarray, max_events=3)
+    for i in range(5):
+        store.push_row("dl1", dl1_row(i, intensity=np.nan if i == 4 else 100.0))
+    assert store.event_keys(1) == [(1, 2), (1, 3), (1, 4)]
+    assert store.find_latest_key(1, "dl1", lambda row: np.isfinite(row["hillas_intensity"])) == (1, 3)
+
+
+def test_push_from_threads(subarray):
+    store = ViewerStore(subarray)
+
+    def push(tel_id):
+        for i in range(50):
+            store.push_row("dl1", dl1_row(i, tel_id=tel_id))
+
+    threads = [threading.Thread(target=push, args=(tel_id,)) for tel_id in (1, 2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert store.statistics(1)["n_rows"] == 50 and store.statistics(2)["n_rows"] == 50
+
+
+def test_updated_event_becomes_the_latest(subarray):
+    store = ViewerStore(subarray)
+    store.push_row("dl1", dl1_row(1))
+    store.push_row("dl1", dl1_row(2))
+    store.push_row("r1", r1_row(1))  # event 1 updated after event 2
+    assert store.latest_key(1) == (1, 1)
+    assert store.event_keys(1) == [(1, 2), (1, 1)]
+
+
+def test_camera_maps_after_late_subarray(subarray):
+    store = ViewerStore()
+    parameters = {k: v for k, v in dl1_row(1).items() if k not in ("image", "peak_time", "image_mask")}
+    store.push_row("dl1", parameters)
+    store.set_subarray(subarray)
+    store.push_row("dl1", dl1_row(2))
+    assert store.statistics(1)["accumulators"]["image_mask_fraction"]["n_entries"] == 1

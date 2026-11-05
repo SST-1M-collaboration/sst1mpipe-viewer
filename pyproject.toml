@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools >= 64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sst1mpipe-viewer"
+version = "0.1.0-dev"
+description = "Bokeh viewer of the SST-1M events (R0, R1, DL0, DL1) and of their accumulated statistics"
+authors = [{ name = "SST-1M collaboration" }]
+license = { file = "LICENSE" }
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.10"
+dependencies = [
+  "ctapipe ~= 0.32.0",
+  "bokeh >= 3.4",
+  "numpy",
+  "astropy",
+  "pyyaml",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "ruff"]
+
+[project.urls]
+Repository = "https://github.com/SST-1M-collaboration/sst1mpipe-viewer"
+
+[project.scripts]
+sst1mpipe-viewer = "sst1mpipe_viewer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sst1mpipe_viewer = ["resources/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 120
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

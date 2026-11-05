@@ -1,0 +1,35 @@
+# Statistics accumulated by the "DL1 Statistics" page, per telescope.
+#
+# hist1d:  {column, bins, range | edges, transform (log10, abs), unit, log_y, title}
+# hist2d:  {x, y, x_bins, x_range, y_bins, y_range, x_transform, y_transform, title}
+# camera:  {column, mode (mean | fraction), unit, title}
+# apply_cuts (default true) can be set on any entry.
+#
+# cuts: list of "<column> <op> <number>" applied to the entries with apply_cuts.
+cuts:
+  - "hillas_intensity > 50"
+
+hist1d:
+  - {column: hillas_intensity, transform: log10, range: [0, 5], bins: 50, title: "log10(intensity / p.e.)", log_y: true, apply_cuts: false}
+  - {column: hillas_length, range: [0, 1.0], bins: 50, unit: deg}
+  - {column: hillas_width, range: [0, 0.4], bins: 50, unit: deg}
+  - {column: hillas_r, range: [0, 5], bins: 50, unit: deg}
+  - {column: hillas_phi, range: [-180, 180], bins: 72, unit: deg}
+  - {column: hillas_psi, range: [-90, 90], bins: 36, unit: deg}
+  - {column: hillas_skewness, range: [-3, 3], bins: 60}
+  - {column: hillas_kurtosis, range: [0, 10], bins: 50}
+  - {column: timing_slope, range: [-20, 20], bins: 40, unit: "ns / deg"}
+  - {column: leakage_intensity_width_2, range: [0, 1], bins: 50, log_y: true}
+  - {column: concentration_cog, range: [0, 1], bins: 50}
+  - {column: morphology_n_islands, range: [-0.5, 10.5], bins: 11, log_y: true}
+  - {column: morphology_n_pixels, range: [0, 100], bins: 50, log_y: true}
+  - {column: peak_time_mean, range: [0, 200], bins: 50, unit: ns}
+
+hist2d:
+  - {x: hillas_intensity, x_transform: log10, x_range: [1, 5], x_bins: 40, y: hillas_length, y_range: [0, 1.0], y_bins: 40, title: "length vs log10(intensity)"}
+  - {x: hillas_intensity, x_transform: log10, x_range: [1, 5], x_bins: 40, y: hillas_width, y_range: [0, 0.4], y_bins: 40, title: "width vs log10(intensity)"}
+  - {x: hillas_fov_lon, x_range: [-5, 5], x_bins: 50, y: hillas_fov_lat, y_range: [-5, 5], y_bins: 50, title: "centre of gravity (deg)"}
+
+camera:
+  - {column: image_mask, mode: fraction, title: "Fraction of events in which the pixel survives the cleaning"}
+  - {column: image, mode: mean, unit: p.e., title: "Mean charge (p.e.)"}
