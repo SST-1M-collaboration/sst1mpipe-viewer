@@ -14,6 +14,8 @@ from .pages import DL1EventPage, DL1StatisticsPage, OverviewPage, WaveformPage
 
 __all__ = ["ViewerSession", "make_document"]
 
+#: background of the banner, the logo is white
+BANNER_COLOR = "#282828"
 #: period of the refresh of the displays (ms)
 REFRESH_PERIOD = 1000
 #: minimum time between two refreshes of the statistics page for new data (s)
@@ -21,7 +23,7 @@ STATISTICS_PERIOD = 2.0
 
 
 @functools.cache
-def _logo_html(height=48):
+def _logo_html(height=56):
     data = base64.b64encode((files("sst1mpipe_viewer") / "resources" / "logo.png").read_bytes()).decode()
     return f"<img src='data:image/png;base64,{data}' style='height: {height}px' alt='SST-1M'>"
 
@@ -72,13 +74,18 @@ class ViewerSession:
         self.tabs = Tabs(tabs=[TabPanel(child=page.layout, title=page.title) for page in self.pages])
         self.tabs.on_change("active", lambda attr, old, new: self.request_refresh())
 
-        title = Div(text=(
-            f"<div style='display: flex; align-items: center; gap: 12px'>{_logo_html()}"
-            "<span style='font-size: 20pt; font-weight: bold'>SST-1M Event Viewer</span></div>"
-        ))
+        # the SST-1M logo (from sst1m.space) is white: it is shown on a dark banner
+        banner = Div(
+            text=(
+                f"<div style='display: flex; align-items: center; gap: 24px; padding: 10px 18px;"
+                f" background: {BANNER_COLOR}; border-radius: 4px'>{_logo_html()}"
+                "<span style='font-size: 22pt; font-weight: 600; color: white'>Event Viewer</span></div>"
+            ),
+            width=1400, height=80,
+        )
         navigation = row(self.tel_select, column(Div(text=""), row(self.live, self.prev_button, self.next_button,
                                                                    self.clear_pixels)))
-        self.layout = column(row(title, Div(width=40), navigation), self.status, self.tabs)
+        self.layout = column(banner, navigation, self.status, self.tabs)
 
         if doc is not None:
             doc.title = "SST-1M Event Viewer"
