@@ -1,9 +1,10 @@
 """Overview page: welcome text, telescope array and summary of the data received"""
 
 from bokeh.layouts import column, row
-from bokeh.models import ColumnDataSource, DataTable, Div, TableColumn
+from bokeh.models import ColumnDataSource, DataTable, Div, RadioButtonGroup, TableColumn
 
-from ..components import ArrayPanel
+from ..components import ArrayMapPanel, ArrayPanel
+from ..components.array import earth_locations
 from ..store import KINDS
 from .base import Page, message_div
 from .pixel_selection import PixelSelectionPanel
@@ -35,7 +36,7 @@ class OverviewPage(Page):
     def __init__(self, session):
         super().__init__(session)
         self._subarray = None
-        self.array_panel = None
+        self.array_panels = {}
         self.message = message_div("No subarray description: the telescope positions are unknown.")
         self.summary_source = ColumnDataSource(data=self._summary({}, {}))
         columns = [
@@ -59,11 +60,27 @@ class OverviewPage(Page):
     def _build_array(self, subarray):
         self._subarray = subarray
         if subarray is None:
-            self.array_panel = None
+            self.array_panels = {}
             self.array_container.children = [self.message]
             return
-        self.array_panel = ArrayPanel(subarray, on_tel_click=self.session.set_tel, width=560, height=460)
-        self.array_container.children = [self.array_panel.layout]
+        # the telescopes on an OpenStreetMap map if the subarray has an Earth location, and in the
+        # ground frame (ctapipe ArrayDisplay)
+        panels = {}
+        if earth_locations(subarray) is not None:
+            panels["Map (OpenStreetMap)"] = ArrayMapPanel(subarray, on_tel_click=self.session.set_tel,
+                                                          width=560, height=460)
+        panels["Ground frame"] = ArrayPanel(subarray, on_tel_click=self.session.set_tel, width=560, height=460)
+        self.array_panels = panels
+        labels = list(panels)
+        view = RadioButtonGroup(labels=labels, active=0)
+
+        def show(attr, old, new):
+            for i, panel in enumerate(panels.values()):
+                panel.layout.visible = i == new
+
+        view.on_change("active", show)
+        show(None, None, 0)
+        self.array_container.children = ([view] if len(labels) > 1 else []) + [p.layout for p in panels.values()]
 
     def _summary(self, counts, rates):
         store = self.store
@@ -93,6 +110,7 @@ class OverviewPage(Page):
         rates = self.store.rates()
         self.summary_source.data = self._summary(self.store.counts(), rates)
         self.pixel_selection.refresh()
-        if self.array_panel is not None:
-            self.array_panel.set_selected(self.session.tel_id)
-            self.array_panel.set_active(sorted({tel for (tel, _), rate in rates.items() if rate > 0}))
+        active = sorted({tel for (tel, _), rate in rates.items() if rate > 0})
+        for panel in self.array_panels.values():
+            panel.set_selected(self.session.tel_id)
+            panel.set_active(active)

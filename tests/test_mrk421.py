@@ -102,14 +102,35 @@ def test_file_mode(subarray):
     # by index; the waveforms of the first 50 events are in the file
     session.go_to("#3")
     assert session.event_key() == keys[3]
+    session.set_selected_pixels([100])
     for i, kind in ((1, "r0"), (2, "r1"), (3, "dl0")):
         page = session.pages[i]
         session.tabs.active = i
         page.refresh()
         assert not page.message.visible, kind
         assert page.waveforms.source.data["pixel"]
-    # R0 of sst1mpipe: the DigiCam fields are shown as pixel fields
-    assert {"pedestal", "pixel_flags"} <= set(session.pages[1].field.options)
+    # R0 of sst1mpipe: every field is readable
+    r0 = session.pages[1]
+    session.tabs.active = 1
+    session.set_selected_pixels([10, 11])
+    r0.refresh()
+    assert list(r0.field_cameras) == ["pixel_flags"]  # one camera per pixel field (pedestal: its own)
+    # the DigiCam baseline: camera and dashed lines on the waveforms (one per pixel)
+    assert r0.baseline_camera.layout.visible
+    assert len(r0.waveforms.baseline_source.data["ys"]) == 2
+    # trigger traces per trigger patch (triplets of pixels)
+    assert r0.trigger.layout.visible and r0.trigger.camera.n_pixels == 432
+    assert len(r0.trigger.traces.source.data["pixel"]) >= 1  # patches of the selected pixels
+    r0.trigger.trace.value = "trigger_output_patch7"
+    r0.trigger.tapped(5, shift=False)
+    assert len(session.selected_pixels) == 3
+    # the table has all the fields of the R0, and those of the trigger
+    names = set(r0.fields.source.data["name"])
+    assert {"waveform", "pedestal", "pixel_flags", "trigger_input_traces", "_event_type"} <= names
+    assert any(name.startswith("trigger.") for name in names)
+    details = dict(zip(r0.fields.source.data["name"], r0.fields.source.data["details"]))
+    assert details["waveform"] == "array (1, 1296, 50) int16"
+    session.set_selected_pixels([])
 
     # unknown event: nothing changes, an error is shown
     session.go_to("123")

@@ -110,3 +110,23 @@ def test_mean_waveform_of_many_pixels():
     assert np.allclose(panel.source.data["ys"][0], waveforms.mean(axis=0))
     panel.set_waveforms(waveforms, [1, 2])
     assert panel.source.data["pixel"] == ["1", "2"]
+
+
+@needs_file
+def test_array_on_a_map(digicam):
+    """The telescopes are shown at their Earth location on OpenStreetMap (Ondrejov)"""
+    from sst1mpipe_viewer.components.array import earth_locations, web_mercator
+
+    lon, lat, height = earth_locations(digicam)
+    assert np.allclose(lat, 49.912, atol=0.002) and np.allclose(lon, 14.782, atol=0.002)
+    x, y = web_mercator([0.0, 180.0], [0.0, 0.0])
+    assert np.allclose(x, [0, 20037508.34], atol=1) and np.allclose(y, 0)
+
+    session = ViewerSession(ViewerStore(digicam), Document())
+    overview = session.pages[0]
+    overview.refresh()
+    assert list(overview.array_panels) == ["Map (OpenStreetMap)", "Ground frame"]
+    map_panel = overview.array_panels["Map (OpenStreetMap)"]
+    assert map_panel.layout.visible and not overview.array_panels["Ground frame"].layout.visible
+    map_panel._clicked("indices", [], [1])
+    assert session.tel_id == 22

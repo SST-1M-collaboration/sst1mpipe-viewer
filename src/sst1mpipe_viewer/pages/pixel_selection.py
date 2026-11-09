@@ -7,7 +7,7 @@ from bokeh.models import Button, Div, Select, TextInput
 from ..components import CameraPanel
 from ..pixel_groups import GROUPINGS, parse_ids, pixel_groups
 
-__all__ = ["PixelSelectionPanel"]
+__all__ = ["PixelSelectionPanel", "select_group"]
 
 HELP = """
 <p style="margin: 0; max-width: 300px">
@@ -16,6 +16,21 @@ Choose how the pixels are grouped, then click on the camera to select the pixels
 The selection is shared by all the pages (waveforms, cameras).
 </p>
 """
+
+
+def select_group(session, pixels, shift):
+    """
+    Select the pixels of a group in the session: replace the selection, or with ``shift`` add the
+    group (remove it if all its pixels are selected)
+    """
+    selected = list(session.selected_pixels)
+    if not shift:
+        selected = list(pixels)
+    elif set(pixels) <= set(selected):
+        selected = [p for p in selected if p not in set(pixels)]
+    else:
+        selected = sorted(set(selected) | set(pixels))
+    session.set_selected_pixels(selected)
 
 
 def _colors(group_ids):
@@ -62,15 +77,7 @@ class PixelSelectionPanel:
         if geometry is None:
             return
         group = self.groups.group_of(geometry, self.column, pixel)
-        pixels = self.groups.pixels(geometry, self.column, [group])
-        selected = list(self.session.selected_pixels)
-        if not shift:
-            selected = pixels
-        elif set(pixels) <= set(selected):
-            selected = [p for p in selected if p not in set(pixels)]
-        else:
-            selected = sorted(set(selected) | set(pixels))
-        self.session.set_selected_pixels(selected)
+        select_group(self.session, self.groups.pixels(geometry, self.column, [group]), shift)
 
     def select_ids(self, text, add=False):
         """Select the pixels of the groups whose ids are in ``text``"""

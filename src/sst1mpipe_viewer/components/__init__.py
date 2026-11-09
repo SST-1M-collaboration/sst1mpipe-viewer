@@ -1,9 +1,12 @@
 """Bokeh components of the viewer, independent of the pages and of the store"""
 
-from .array import ArrayPanel
+from .array import ArrayMapPanel, ArrayPanel
 from .camera import CameraPanel
 from .histogram import Histogram1DPanel, Histogram2DPanel
-from .table import ParameterTable
+from .table import FieldsTable
 from .waveform import WaveformPanel
 
-__all__ = ["ArrayPanel", "CameraPanel", "Histogram1DPanel", "Histogram2DPanel", "ParameterTable", "WaveformPanel"]
+__all__ = [
+    "ArrayMapPanel", "ArrayPanel", "CameraPanel", "FieldsTable", "Histogram1DPanel", "Histogram2DPanel",
+    "WaveformPanel",
+]

@@ -7,7 +7,7 @@ from conftest import dl1_row, r1_row
 
 from sst1mpipe_viewer.app import ViewerSession
 from sst1mpipe_viewer.components import CameraPanel, Histogram1DPanel
-from sst1mpipe_viewer.pages.waveforms import camera_quantity
+from sst1mpipe_viewer.pages.waveforms import sample_image
 from sst1mpipe_viewer.store import ViewerStore
 
 
@@ -34,8 +34,12 @@ def test_all_pages_refresh(subarray):
     r0, r1 = session.pages[1], session.pages[2]
     assert r0.message.visible  # no R0 data
     assert not r1.message.visible
-    # the brightest pixel is shown without selection
-    assert r1.waveforms.source.data["pixel"] == ["7"]
+    # without selection no waveform is shown (no computation to choose a pixel)
+    assert r1.waveforms.source.data["pixel"] == []
+    # all the fields of the event are in the table
+    assert {"waveform", "pixel_status", "event_id"} <= set(r1.fields.source.data["name"])
+    # one camera per per-pixel field
+    assert list(r1.field_cameras) == ["pixel_status"]
     assert session.pages[4].parameters.source.data["name"]
 
 
@@ -115,8 +119,8 @@ def test_components(subarray):
     assert histogram.figure.x_range.end == 3
 
     waveforms = np.arange(6.0).reshape(2, 3)
-    assert list(camera_quantity(waveforms, "Maximum")) == [2, 5]
-    assert list(camera_quantity(waveforms, "Sample", 1)) == [1, 4]
+    assert list(sample_image(waveforms, 1)) == [1, 4]
+    assert list(sample_image(waveforms, 10)) == [2, 5]  # the last sample
 
 
 def test_server_application(subarray):

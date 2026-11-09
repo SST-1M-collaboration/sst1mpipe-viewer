@@ -4,10 +4,8 @@ import numpy as np
 from bokeh.layouts import Spacer, column, row
 from bokeh.models import Button, CheckboxGroup, ColumnDataSource, DataTable, Div, TableColumn, TextInput
 
-from ..components import CameraPanel, Histogram1DPanel, Histogram2DPanel, ParameterTable
-from ..components.table import scalar_items
+from ..components import CameraPanel, FieldsTable, Histogram1DPanel, Histogram2DPanel
 from ..config import display_options
-from ..normalize import KEY_COLUMNS
 from ..units import column_unit
 from .base import Page, event_description, message_div
 
@@ -31,7 +29,7 @@ class DL1EventPage(Page):
         self.options.on_change("active", lambda attr, old, new: self.refresh())
         self.image = CameraPanel(title="Image", on_pixel_click=session.set_selected_pixels)
         self.peak_time = CameraPanel(title="Peak time", cmap="viridis", on_pixel_click=session.set_selected_pixels)
-        self.parameters = ParameterTable(height=470)
+        self.parameters = FieldsTable(width=460, height=470)
         self.layout = column(
             self.message,
             self.options,
@@ -56,7 +54,7 @@ class DL1EventPage(Page):
             self.message.visible = True
             self.image.clear()
             self.peak_time.clear()
-            self.parameters.set_items([])
+            self.parameters.set_rows({})
             return
         self.message.visible = False
         show_mask = SHOW_MASK in self.options.active
@@ -73,7 +71,7 @@ class DL1EventPage(Page):
             panel.set_mask(mask)
             panel.set_ellipse(hillas)
             panel.set_selected(session.selected_pixels)
-        self.parameters.set_items(scalar_items(data, exclude=KEY_COLUMNS))
+        self.parameters.set_rows({"dl1": data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})})
 
 
 def _label(name, transform=None, unit=None):

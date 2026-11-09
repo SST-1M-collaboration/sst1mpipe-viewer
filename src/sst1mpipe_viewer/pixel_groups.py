@@ -9,9 +9,10 @@ import re
 from functools import cache
 from importlib.resources import files
 
+import astropy.units as u
 import numpy as np
 
-__all__ = ["GROUPINGS", "PixelGroups", "parse_ids", "pixel_groups"]
+__all__ = ["GROUPINGS", "PixelGroups", "group_geometry", "parse_ids", "pixel_groups"]
 
 #: label of each grouping -> column of the table
 GROUPINGS = {
@@ -75,3 +76,31 @@ def pixel_groups():
     with (files("sst1mpipe_viewer") / "resources" / "digicam_pixel_groups.csv").open() as f:
         rows = list(csv.DictReader(f))
     return PixelGroups({column: [int(row[column]) for row in rows] for column in GROUPINGS.values()})
+
+
+def group_geometry(geometry, grouping="patch", groups=None):
+    """
+    Camera geometry of the groups of pixels of ``geometry`` (e.g. the 432 trigger patches of
+    DigiCam, ``pix_id`` = patch_sw_id, the order of the trigger traces): each group is a hexagon
+    at the centre of its pixels with their total area, rotated by 30 deg with respect to the pixels
+    (the triplets of hexagonal pixels tile the camera as hexagons of 3 times their area).
+    """
+    from ctapipe.instrument import CameraGeometry
+
+    groups = pixel_groups() if groups is None else groups
+    values = groups.values(geometry, grouping)
+    ids = np.unique(values)
+    x = np.array([geometry.pix_x.value[values == i].mean() for i in ids])
+    y = np.array([geometry.pix_y.value[values == i].mean() for i in ids])
+    area = np.array([geometry.pix_area.value[values == i].sum() for i in ids])
+    return CameraGeometry(
+        name=f"{geometry.name}_{grouping}",
+        pix_id=ids,
+        pix_x=x * geometry.pix_x.unit,
+        pix_y=y * geometry.pix_y.unit,
+        pix_area=area * geometry.pix_area.unit,
+        pix_type=geometry.pix_type,
+        pix_rotation=geometry.pix_rotation + 30 * u.deg,
+        cam_rotation=geometry.cam_rotation,
+        frame=geometry.frame,
+    )

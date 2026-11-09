@@ -9,10 +9,13 @@ their DL1 parameters, based on [ctapipe](https://github.com/cta-observatory/ctap
 
 | Page | Content |
 |---|---|
-| **Overview** | Telescope array (click a telescope to select it), data received per telescope and data level (events, rates, last event) |
-| **R0 / R1 / DL0** | Camera image computed from the waveforms (maximum, sum, a sample, time of maximum), waveforms of the selected pixels, any per pixel field of the data (e.g. `pixel_status`) |
-| **DL1 Event** | Image and peak time with the cleaning mask and the Hillas ellipse, table of the DL1 parameters |
+| **Overview** | Telescopes on an OpenStreetMap map at their Earth location (or in the ground frame), data received per telescope and data level; **pixel selection by group** of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
+| **R0 / R1 / DL0** | Every field of the data: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 10 pixels), one camera per per-pixel field (e.g. `pixel_flags`, `pixel_status`); for the R0 of DigiCam, the baseline (`pedestal`) camera and dashed lines on the waveforms, and the **trigger traces per trigger patch** (camera of the 432 triplets of pixels at the selected sample, traces of the patches of the selected pixels); the list of all the fields (values, shapes of the arrays, times, event types) |
+| **DL1 Event** | Image and peak time with the cleaning mask and the Hillas ellipse, the list of all the DL1 and trigger fields |
 | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, correlations, camera maps (fraction of events in which a pixel survives the cleaning, mean charge), with cuts and reset buttons (per plot, per telescope, all) |
+
+The viewer only reads the data as defined in the ctapipe / sst1mpipe containers: the cameras show
+the values of a field (or of a sample of the waveforms), without computation.
 
 The telescope is chosen at the top of the page. A click on a camera pixel selects it on all the
 pages (shift+click adds or removes a pixel). The displayed event is chosen in the header:
