@@ -19,7 +19,8 @@ class ArrayPanel:
     receiving data. ``on_tel_click(tel_id)`` is called when a telescope is clicked.
     """
 
-    def __init__(self, subarray, on_tel_click=None, width=640, height=560, scale=8.0):
+    def __init__(self, subarray, on_tel_click=None, width=640, height=560, scale=8.0, colors=None):
+        self._colors = colors or {}
         self.subarray = subarray
         self.display = ArrayDisplay(
             subarray, scale=scale, width=width, height=height, use_notebook=False,
@@ -44,9 +45,9 @@ class ArrayPanel:
         self.figure.add_layout(LabelSet(x="x", y="y", text="text", source=labels, text_align="center",
                                         text_font_size="11pt", text_font_style="bold"))
 
-        self._ring = ColumnDataSource(data=dict(x=[], y=[], radius=[]))
+        self._ring = ColumnDataSource(data=dict(x=[], y=[], radius=[], color=[]))
         self.figure.circle(x="x", y="y", radius="radius", source=self._ring, fill_color=None,
-                           line_color=SELECTED_COLOR, line_width=3)
+                           line_color="color", line_width=4)
         self._active = ColumnDataSource(data=dict(x=[], y=[]))
         self.figure.scatter(x="x", y="y", source=self._active, size=10, marker="circle",
                             fill_color=ACTIVE_COLOR, line_color="white")
@@ -64,12 +65,13 @@ class ArrayPanel:
             # the selection is shown by the ring
             self.display.datasource.selected.indices = []
 
-    def set_selected(self, tel_id):
-        if tel_id in self.tel_ids:
-            i = self.tel_ids.index(tel_id)
-            self._ring.data = dict(x=[self._x[i]], y=[self._y[i]], radius=[self._radius[i] * 1.4])
-        else:
-            self._ring.data = dict(x=[], y=[], radius=[])
+    def set_selected(self, tel_ids):
+        """Ring of the color of each selected telescope"""
+        indices = [self.tel_ids.index(t) for t in tel_ids if t in self.tel_ids]
+        data = dict(x=self._x[indices], y=self._y[indices], radius=self._radius[indices] * 1.4,
+                    color=[self._colors.get(self.tel_ids[i], SELECTED_COLOR) for i in indices])
+        if any(not np.array_equal(data[k], self._ring.data.get(k, [])) for k in ("x", "y")):
+            self._ring.data = data
 
     def set_active(self, tel_ids):
         """Mark the telescopes receiving data"""
@@ -109,7 +111,9 @@ class ArrayMapPanel:
     `ArrayPanel`. Use `earth_locations` to know whether the subarray has a location.
     """
 
-    def __init__(self, subarray, on_tel_click=None, width=640, height=560, tiles="OpenStreetMap Mapnik"):
+    def __init__(self, subarray, on_tel_click=None, width=640, height=560, tiles="OpenStreetMap Mapnik",
+                 colors=None):
+        self._colors = colors or {}
         lon, lat, height_m = earth_locations(subarray)
         self.tel_ids = [int(t) for t in subarray.tel_ids]
         x, y = web_mercator(lon, lat)
@@ -127,8 +131,9 @@ class ArrayMapPanel:
         self.source = ColumnDataSource(data=dict(
             x=x, y=y, radius=radius * 4, tel_id=self.tel_ids, label=[f"TEL {t}" for t in self.tel_ids],
             type=[str(subarray.tel[t]) for t in self.tel_ids], lon=lon, lat=lat, height=height_m,
+            color=[self._colors.get(t, "#1f77b4") for t in self.tel_ids],
         ))
-        renderer = self.figure.circle(x="x", y="y", radius="radius", source=self.source, fill_color="#1f77b4",
+        renderer = self.figure.circle(x="x", y="y", radius="radius", source=self.source, fill_color="color",
                                       line_color="white", line_width=2, fill_alpha=0.9)
         self.figure.add_tools(HoverTool(renderers=[renderer], tooltips=[
             ("telescope", "@label"), ("type", "@type"), ("longitude", "@lon{0.00000} deg"),
@@ -138,9 +143,9 @@ class ArrayMapPanel:
                                         text_align="center", text_font_size="11pt", text_font_style="bold",
                                         background_fill_color="white", background_fill_alpha=0.7))
         self._x, self._y, self._radius = x, y, radius * 4
-        self._ring = ColumnDataSource(data=dict(x=[], y=[], radius=[]))
+        self._ring = ColumnDataSource(data=dict(x=[], y=[], radius=[], color=[]))
         self.figure.circle(x="x", y="y", radius="radius", source=self._ring, fill_color=None,
-                           line_color=SELECTED_COLOR, line_width=3)
+                           line_color="color", line_width=4)
         self._active = ColumnDataSource(data=dict(x=[], y=[]))
         self.figure.scatter(x="x", y="y", source=self._active, size=10, marker="circle",
                             fill_color=ACTIVE_COLOR, line_color="white")
@@ -156,11 +161,12 @@ class ArrayMapPanel:
             # the selection is shown by the ring
             self.source.selected.indices = []
 
-    def set_selected(self, tel_id):
-        if tel_id in self.tel_ids:
-            i = self.tel_ids.index(tel_id)
-            self._ring.data = dict(x=[self._x[i]], y=[self._y[i]], radius=[self._radius[i] * 1.4])
-        else:
-            self._ring.data = dict(x=[], y=[], radius=[])
+    def set_selected(self, tel_ids):
+        """Ring of the color of each selected telescope"""
+        indices = [self.tel_ids.index(t) for t in tel_ids if t in self.tel_ids]
+        data = dict(x=self._x[indices], y=self._y[indices], radius=self._radius[indices] * 1.4,
+                    color=[self._colors.get(self.tel_ids[i], SELECTED_COLOR) for i in indices])
+        if any(not np.array_equal(data[k], self._ring.data.get(k, [])) for k in ("x", "y")):
+            self._ring.data = data
 
     set_active = ArrayPanel.set_active

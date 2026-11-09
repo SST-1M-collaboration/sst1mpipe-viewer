@@ -81,62 +81,76 @@ def test_file_mode(subarray):
     assert len(keys) == 1000
 
     session = Browser(store)
-    assert session.tel_id == 21 and not session.follow
-    assert session.event_key() == keys[0]
+    assert session.tel_ids == [21, 22] and not session.follow
+    assert session.event_key(21) == keys[0]
+    session.set_tels([21])
     session.step(+1)
-    assert session.event_key() == keys[1]
+    assert session.event_key(21) == keys[1]
     session.step(-5)
-    assert session.event_key() == keys[0]
+    assert session.event_key(21) == keys[0]
 
     # an event surviving the cleaning, by its event_id: its Hillas ellipse is drawn
     cleaned = [k for k in keys if np.isfinite(store.event(21, k)["dl1"]["hillas_intensity"])]
     session.go_to(str(cleaned[0][1]))
-    assert session.event_key() == cleaned[0]
+    assert session.event_key(21) == cleaned[0]
     dl1_page = session.pages[4]
     dl1_page.refresh()
-    assert not dl1_page.message.visible
-    assert dl1_page.image._ellipse_source.data["x"]
+    assert not dl1_page.views[21].message.text
+    assert dl1_page.views[21].camera._ellipse_source.data["x"]
 
     # by index; the waveforms of the first 50 events are in the file
     session.go_to("#3")
-    assert session.event_key() == keys[3]
+    assert session.event_key(21) == keys[3]
     session.set_selected_pixels([100])
     for i, kind in ((1, "r0"), (2, "r1"), (3, "dl0")):
         page = session.pages[i]
         page.refresh()
-        assert not page.message.visible, kind
-        assert page.waveforms.source.data["pixel"]
-    # R0 of sst1mpipe: every field is readable
+        assert not page.views[21].message.text, kind
+        assert page.views[21].waveforms.source.data["pixel"]
+    # R0 of sst1mpipe: every field is readable, the fields of the same shape in a menu
     r0 = session.pages[1]
     session.set_selected_pixels([10, 11])
     r0.refresh()
-    assert list(r0.field_cameras) == ["pixel_flags"]  # one camera per pixel field (pedestal: its own)
-    # the DigiCam baseline: camera and dashed lines on the waveforms (one per pixel)
-    assert r0.baseline_camera.layout.visible
-    assert len(r0.waveforms.baseline_source.data["ys"]) == 2
-    # trigger traces per trigger patch (triplets of pixels)
-    assert r0.trigger.layout.visible and r0.trigger.camera.n_pixels == 432
-    assert len(r0.trigger.traces.source.data["pixel"]) >= 1  # patches of the selected pixels
-    r0.trigger.trace.value = "trigger_output_patch7"
-    r0.trigger.tapped(5, shift=False)
+    assert {"pedestal", "pixel_flags"} <= set(r0.pixel_field.options)
+    assert r0.waveform_field.options == ["waveform"]
+    view = r0.views[21]
+    # the DigiCam baseline: dashed lines on the waveforms (one per pixel), and in the pixel field menu
+    assert len(view.waveforms.baseline_source.data["ys"]) == 2
+    r0.pixel_field.value = "pedestal"
+    assert view.field_camera.figure.title.text == "pedestal"
+    # trigger traces per trigger patch (triplets of pixels), chosen in a menu
+    assert view.trigger.camera.n_pixels == 432
+    assert len(view.trigger.traces.source.data["pixel"]) >= 1  # patches of the selected pixels
+    assert "trigger_output_patch7" in r0.trace.options
+    r0.trace.value = "trigger_output_patch7"
+    view.trigger.tapped(5, shift=False)
     assert len(session.selected_pixels) == 3
     # the table has all the fields of the R0, and those of the trigger
-    names = set(r0.fields.source.data["name"])
+    data = r0.fields.source.data
+    names = set(data["name"])
     assert {"waveform", "pedestal", "pixel_flags", "trigger_input_traces", "_event_type"} <= names
     assert any(name.startswith("trigger.") for name in names)
-    details = dict(zip(r0.fields.source.data["name"], r0.fields.source.data["details"]))
-    assert details["waveform"] == "array (1, 1296, 50) int16"
+    assert dict(zip(data["name"], data["tel_21"]))["waveform"] == "array (1, 1296, 50) int16"
     session.set_selected_pixels([])
 
     # unknown event: nothing changes, an error is shown
     session.go_to("123")
-    assert session.event_key() == keys[3]
-    assert "no event 123" in session.status.text or "no event 123" in session._status_text()
+    assert session.event_key(21) == keys[3]
+    assert "no event 123" in session._status_text()
 
     # without waveforms (after the first 50 events)
     session.go_to("#100")
     session.pages[2].refresh()
-    assert session.pages[2].message.visible
+    assert session.pages[2].views[21].message.text
+
+    # both telescopes: one block each, one column each in the table
+    session.set_tels([21, 22])
+    session.go_to("#0")
+    r1 = session.pages[2]
+    r1.refresh()
+    assert [child for child in r1.views_container.children] == [r1.views[21].layout, r1.views[22].layout]
+    assert not r1.views[21].message.text and not r1.views[22].message.text
+    assert {"tel_21", "tel_22"} <= set(r1.fields.source.data)
 
 
 def test_files_of_one_telescope_each(tmp_path, subarray):

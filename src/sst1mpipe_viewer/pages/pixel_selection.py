@@ -53,7 +53,7 @@ class PixelSelectionPanel:
         self.info = Div(text="", width=300)
         self.message = Div(text="", width=300, styles={"color": "#666"})
         self.camera = CameraPanel(title="Groups of pixels", width=430, height=400, cmap="viridis",
-                                  show_controls=False, on_pixel_tap=self.tapped, show_colorbar=False,
+                                  on_pixel_tap=self.tapped, show_colorbar=False,
                                   selected_color="#e53935")
         self._state = None
         self._info_state = None
@@ -67,8 +67,13 @@ class PixelSelectionPanel:
     def column(self):
         return GROUPINGS[self.grouping.value]
 
+    def _tel_id(self):
+        """Telescope whose camera is shown: the first selected one (the cameras are the same)"""
+        tel_ids = self.session.tel_ids or self.session.all_tel_ids
+        return tel_ids[0] if tel_ids else None
+
     def _geometry(self):
-        geometry = self.session.geometry()
+        geometry = self.session.geometry(self._tel_id())
         return geometry if self.groups.matches(geometry) else None
 
     def tapped(self, pixel, shift):
@@ -110,14 +115,14 @@ class PixelSelectionPanel:
         self.camera.layout.visible = True
         if self.message.text.startswith("The pixel groups"):
             self.message.text = ""
-        state = (self.session.tel_id, self.column)
+        state = (self._tel_id(), self.column)
         values = self.groups.values(geometry, self.column)
         if force or state != self._state:
             self._state = state
             self.camera.set_geometry(geometry)
             self.camera.set_image(_colors(values))
             self.camera.set_hover_column(self.grouping.value, values)
-            self.camera.set_title(f"{self.grouping.value}s of TEL {self.session.tel_id}"
+            self.camera.set_title(f"{self.grouping.value}s of TEL {self._tel_id()}"
                                   f" ({len(np.unique(values))} groups)")
         selected = self.session.selected_pixels
         self.camera.set_selected(selected)

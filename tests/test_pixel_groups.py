@@ -127,5 +127,17 @@ def test_array_on_a_map(digicam):
     assert list(overview.array_panels) == ["Map (OpenStreetMap)", "Ground frame"]
     map_panel = overview.array_panels["Map (OpenStreetMap)"]
     assert map_panel.layout.visible and not overview.array_panels["Ground frame"].layout.visible
+    # a click on a telescope selects or unselects it; the telescopes have their colors
+    assert session.tel_ids == [21, 22]
     map_panel._clicked("indices", [], [1])
-    assert session.tel_id == 22
+    assert session.tel_ids == [21]
+    overview.refresh()
+    assert overview.telescopes.active == [0]
+    assert len(map_panel._ring.data["x"]) == 1
+    map_panel._clicked("indices", [], [1])
+    assert session.tel_ids == [21, 22]
+    colors = map_panel.source.data["color"]
+    assert colors[0] != colors[1] and colors[0] == session.color(21)
+    # the selection with the boxes
+    overview.telescopes.active = [1]
+    assert session.tel_ids == [22]

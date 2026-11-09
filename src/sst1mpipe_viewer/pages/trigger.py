@@ -1,14 +1,13 @@
 """Trigger traces of the DigiCam R0 data, displayed per trigger patch (triplet of pixels)"""
 
 import numpy as np
-from bokeh.layouts import column, row
-from bokeh.models import Div, Select, Slider
+from bokeh.layouts import column
 
-from ..components import CameraPanel, WaveformPanel
+from ..components import WaveformPanel
 from ..pixel_groups import group_geometry, pixel_groups
 from .pixel_selection import select_group
 
-__all__ = ["TRACE_FIELDS", "TriggerTracesPanel"]
+__all__ = ["TRACE_FIELDS", "TriggerView", "patch_geometry"]
 
 #: trigger traces of the R0 data of sst1mpipe: (n_patches, n_samples), patch_sw_id order
 #: (central patch of the clusters for the outputs)
@@ -19,87 +18,74 @@ TRACE_FIELDS = {
     "trigger_output_muon": "Trigger output, muon clusters",
 }
 
+_PATCH_GEOMETRIES = {}
 
-class TriggerTracesPanel:
+
+def patch_geometry(geometry):
+    """Geometry of the trigger patches of a pixel geometry (cached), None if it is not DigiCam"""
+    groups = pixel_groups()
+    if geometry is None or not groups.matches(geometry):
+        return None
+    key = id(geometry)
+    if key not in _PATCH_GEOMETRIES:
+        _PATCH_GEOMETRIES[key] = (geometry, group_geometry(geometry, "patch", groups))
+    return _PATCH_GEOMETRIES[key][1]
+
+
+def trace_fields(row):
+    """The trigger traces of a row"""
+    return [name for name in TRACE_FIELDS if name in row and np.ndim(row[name]) == 2]
+
+
+class TriggerView:
     """
-    Camera of the trigger patches (`sst1mpipe_viewer.pixel_groups.group_geometry`) showing a
-    trigger trace, and the traces of the patches of the selected pixels. A click on a patch
-    selects its 3 pixels (shift+click adds or removes them).
+    Trigger traces of a telescope: camera of the trigger patches
+    (`sst1mpipe_viewer.pixel_groups.group_geometry`) at a sample of a trace, and the traces of the
+    patches of the selected pixels. A click on a patch selects its 3 pixels (shift+click adds or
+    removes them).
     """
 
-    def __init__(self, session, on_change=None):
+    def __init__(self, session, tel_id, width=400, height=370):
         self.session = session
+        self.tel_id = tel_id
         self.groups = pixel_groups()
-        self.trace = Select(title="Trigger trace", value="trigger_input_traces", options=list(TRACE_FIELDS), width=210)
-        self.sample = Slider(title="Sample shown in the camera", start=0, end=1, value=0, step=1, width=350)
-        if on_change is not None:
-            self.trace.on_change("value", lambda attr, old, new: on_change())
-            self.sample.on_change("value_throttled", lambda attr, old, new: on_change())
-        self.camera = CameraPanel(title="Trigger patches", on_pixel_tap=self.tapped)
-        self.traces = WaveformPanel(title="Trigger traces", y_label="trigger trace", item_label="patch")
-        self.message = Div(text="", styles={"color": "#666"})
-        self._geometries = {}
+        self.camera = session.camera_panel(title="Trigger patches", on_pixel_tap=self.tapped, width=width,
+                                           height=height)
+        self.traces = WaveformPanel(title="Trigger traces", y_label="trigger trace", item_label="patch",
+                                    width=520, height=height)
         self._pixel_geometry = None
-        self.layout = column(
-            Div(text="<h3 style='margin: 10px 0 0 0'>Trigger traces (per trigger patch: triplet of pixels)</h3>"),
-            self.message,
-            row(self.trace, self.sample),
-            row(self.camera.layout, self.traces.layout),
-        )
-
-    def patch_geometry(self, geometry):
-        """Geometry of the trigger patches of a pixel geometry (cached), None if not DigiCam"""
-        if not self.groups.matches(geometry):
-            return None
-        key = id(geometry)
-        if key not in self._geometries:
-            self._geometries[key] = group_geometry(geometry, "patch", self.groups)
-        return self._geometries[key]
+        self.layout = column(self.camera.layout)
 
     def tapped(self, patch, shift):
         geometry = self._pixel_geometry
-        if geometry is None:
+        patches = patch_geometry(geometry)
+        if patches is None:
             return
-        patch_geometry = self.patch_geometry(geometry)
-        patch_id = int(patch_geometry.pix_id[patch])
-        select_group(self.session, self.groups.pixels(geometry, "patch", [patch_id]), shift)
+        select_group(self.session, self.groups.pixels(geometry, "patch", [int(patches.pix_id[patch])]), shift)
 
-    def update(self, data, geometry):
-        """Show the trigger traces of a R0 row (hidden if it has none)"""
+    def clear(self):
+        self.camera.clear()
+        self.traces.clear()
+
+    def update(self, data, geometry, trace, sample):
+        """Show the trace ``trace`` of a R0 row at ``sample``"""
+        patches = patch_geometry(geometry)
+        if trace not in data or patches is None or np.shape(data[trace])[0] != patches.n_pixels:
+            self.camera.set_title("No trigger traces")
+            self.clear()
+            return
         from .waveforms import sample_image
 
-        fields = [name for name in TRACE_FIELDS if name in data and np.ndim(data[name]) == 2]
-        self.layout.visible = bool(fields)
-        if not fields:
-            return
-        if self.trace.options != fields:
-            self.trace.options = fields
-        if self.trace.value not in fields:
-            self.trace.value = fields[0]
-        patch_geometry = self.patch_geometry(geometry)
-        traces = np.asarray(data[self.trace.value], dtype=float)
-        if patch_geometry is None or traces.shape[0] != patch_geometry.n_pixels:
-            self.message.text = "The trigger patches are those of DigiCam: not available for this camera."
-            self.camera.layout.visible = False
-            self.traces.clear()
-            return
-        self.message.text = ""
-        self.camera.layout.visible = True
+        traces = np.asarray(data[trace], dtype=float)
         self._pixel_geometry = geometry
-        self.camera.set_geometry(patch_geometry)
-        n_samples = traces.shape[1]
-        if self.sample.end != max(n_samples - 1, 1):
-            self.sample.end = max(n_samples - 1, 1)
-            self.sample.value = min(self.sample.value, n_samples - 1)
-        sample = self.sample.value
+        self.camera.set_geometry(patches)
         self.camera.set_image(sample_image(traces, sample))
-        self.camera.set_title(f"{self.trace.value} sample {sample} – TEL {self.session.tel_id}")
-        self.camera.set_caption(TRACE_FIELDS[self.trace.value])
-
+        self.camera.set_title(f"{trace} sample {sample}")
+        self.camera.set_caption(TRACE_FIELDS[trace])
         # patches of the selected pixels (index in the patch geometry = position of their patch_sw_id)
         selected = self.session.selected_pixels
         patch_ids = self.groups.groups(geometry, "patch", selected) if selected else []
-        patches = np.searchsorted(patch_geometry.pix_id, patch_ids).tolist()
-        self.camera.set_selected(patches)
-        self.traces.set_waveforms(traces, patches, sample=sample)
-        self.traces.figure.title.text = f"{self.trace.value}" + ("" if patches else " (click on a patch)")
+        indices = np.searchsorted(patches.pix_id, patch_ids).tolist()
+        self.camera.set_selected(indices)
+        self.traces.set_waveforms(traces, indices, sample=sample)
+        self.traces.figure.title.text = f"{trace}" + ("" if indices else " (click on a patch)")

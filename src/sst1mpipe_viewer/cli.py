@@ -50,10 +50,18 @@ def parse_args(argv=None):
                         help="push the events of the files one after the other at this rate (events per second),"
                         " as a live stream, instead of all at once")
     parser.add_argument("--loop", action="store_true", help="with --replay-rate, replay the files endlessly")
-    parser.add_argument("--refresh-period", type=int, default=1000,
-                        help="period of the refresh of the displays in ms (default: %(default)s)")
+    parser.add_argument("--refresh-period", type=int, default=250,
+                        help="period of the check for changes in ms (default: %(default)s)")
+    parser.add_argument("--event-period", type=float, default=0.5,
+                        help="minimum time between two displayed events of a stream in s (default: %(default)s)")
     parser.add_argument("--statistics-period", type=float, default=2.0,
                         help="minimum time between two refreshes of the statistics in s (default: %(default)s)")
+    parser.add_argument("--colormap", default="inferno",
+                        help="colormap of the cameras of the data (default: %(default)s)")
+    parser.add_argument("--field-colormap", default="viridis",
+                        help="colormap of the cameras of the per pixel fields (default: %(default)s)")
+    parser.add_argument("--color-scale", choices=["lin", "log"], default="lin",
+                        help="color scale of the cameras (default: %(default)s)")
     parser.add_argument("--show", action="store_true", help="open the viewer in a browser")
     return parser.parse_args(argv)
 
@@ -82,7 +90,9 @@ def main(argv=None):
 
     log.info("SST-1M viewer at http://%s:%d/", args.address or "localhost", args.port)
     serve(store, port=args.port, address=args.address, allow_websocket_origin=args.allow_websocket_origin,
-          show=args.show, refresh_period=args.refresh_period, statistics_period=args.statistics_period)
+          show=args.show, refresh_period=args.refresh_period, statistics_period=args.statistics_period,
+          event_period=args.event_period, colormap=args.colormap, field_colormap=args.field_colormap,
+          color_scale=args.color_scale)
 
 
 def run_feeds(feeds, loop=False):

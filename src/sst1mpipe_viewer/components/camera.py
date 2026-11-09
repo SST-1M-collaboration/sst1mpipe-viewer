@@ -1,16 +1,17 @@
-"""Camera display with its controls, based on the bokeh CameraDisplay of ctapipe"""
+"""Camera display based on the bokeh CameraDisplay of ctapipe"""
 
 import numpy as np
 from bokeh.events import Tap
-from bokeh.layouts import column, row
-from bokeh.models import Checkbox, ColorBar, ColumnDataSource, HoverTool, NumericInput, Select
+from bokeh.layouts import column
+from bokeh.models import ColorBar, ColumnDataSource, HoverTool
 from ctapipe.visualization.bokeh import CameraDisplay
 
 from .histogram import add_caption
 
-__all__ = ["CameraPanel", "CMAPS"]
+__all__ = ["CameraPanel", "COLOR_SCALES"]
 
-CMAPS = ("inferno", "viridis", "magma", "gray")
+#: color scales of the cameras (configured when the viewer is started, not in the pages)
+COLOR_SCALES = ("lin", "log")
 
 MASK_COLOR = "#00e676"
 SELECTED_COLOR = "#00b0ff"
@@ -20,10 +21,10 @@ TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
 
 class CameraPanel:
     """
-    Camera image (ctapipe `~ctapipe.visualization.bokeh.CameraDisplay`) with a color bar,
-    the choice of the colormap, of the linear or logarithmic scale and of the color range
-    (automatic or fixed), the highlight of a pixel mask (e.g. the cleaning mask), of the
-    selected pixels and a Hillas ellipse.
+    Camera image (ctapipe `~ctapipe.visualization.bokeh.CameraDisplay`) with a color bar (color
+    range adjusted to the values), the outline of a pixel mask (e.g. the cleaning mask) and of the
+    selected pixels, and a Hillas ellipse. The colormap and the linear or logarithmic color scale
+    are set when the viewer is started (no widget in the pages, lighter to navigate).
 
     Parameters
     ----------
@@ -40,9 +41,12 @@ class CameraPanel:
     """
 
     def __init__(self, geometry=None, title="", cmap="inferno", width=440, height=400, on_pixel_click=None,
-                 show_controls=True, on_pixel_tap=None, show_colorbar=True, selected_color=SELECTED_COLOR):
+                 on_pixel_tap=None, show_colorbar=True, selected_color=SELECTED_COLOR, scale="lin"):
+        if scale not in COLOR_SCALES:
+            raise ValueError(f"Unknown color scale {scale!r}, known: {COLOR_SCALES}")
+        self.scale = scale
         self.display = CameraDisplay(
-            geometry=None, cmap=cmap, title=title, width=width, height=height, tools=TOOLS,
+            geometry=None, cmap=cmap, norm=scale, title=title, width=width, height=height, tools=TOOLS,
             use_notebook=False, toolbar_location="above",
         )
         self.figure = self.display.figure
@@ -82,20 +86,8 @@ class CameraPanel:
         if on_pixel_click is not None or on_pixel_tap is not None:
             self.figure.on_event(Tap, self._tapped)
 
-        self.cmap_select = Select(title="Colormap", value=cmap, options=list(CMAPS), width=95)
-        self.scale_select = Select(title="Scale", value="lin", options=["lin", "log"], width=65)
-        self.autoscale = Checkbox(label="Autoscale", active=True, width=85)
-        self.low_input = NumericInput(title="Min", value=0, mode="float", width=75, disabled=True)
-        self.high_input = NumericInput(title="Max", value=1, mode="float", width=75, disabled=True)
-        self.cmap_select.on_change("value", lambda attr, old, new: self._set_cmap(new))
-        self.scale_select.on_change("value", lambda attr, old, new: self._set_norm(new))
-        self.autoscale.on_change("active", lambda attr, old, new: self._set_autoscale(new))
-        self.low_input.on_change("value", lambda attr, old, new: self._apply_limits())
-        self.high_input.on_change("value", lambda attr, old, new: self._apply_limits())
-
         self.caption = add_caption(self.figure)
-        controls = row(self.cmap_select, self.scale_select, self.autoscale, self.low_input, self.high_input)
-        self.layout = column(controls, self.figure) if show_controls else column(self.figure)
+        self.layout = column(self.figure)
 
         if geometry is not None:
             self.set_geometry(geometry)
@@ -127,6 +119,9 @@ class CameraPanel:
             self._xs, self._ys = data["xs"], data["ys"]
         else:  # circles: no outline layers
             self._xs, self._ys = [], []
+        # the tooltip is that of the pixels (not of the overlays)
+        for tool in self.figure.select(HoverTool):
+            tool.renderers = [self.display._patches]
         # the overlays are drawn over the pixels
         self.figure.renderers = [r for r in self.figure.renderers if r not in self._overlays] + self._overlays
         if self._color_bar is None:
@@ -175,8 +170,7 @@ class CameraPanel:
         if values.shape != (self.n_pixels,):
             raise ValueError(f"Expected {self.n_pixels} values, got an array of shape {values.shape}")
         self.display.datasource.patch({"values": [(slice(None), values)]})
-        if self.autoscale.active:
-            self._rescale()
+        self._rescale(values)
 
     def clear(self):
         """Show an empty camera"""
@@ -266,52 +260,17 @@ class CameraPanel:
         self._update_mask()
         self._update_selected()
 
-    def _finite_values(self):
-        values = np.asarray(self.display.datasource.data["values"], dtype=float)
+    def _rescale(self, values):
+        """Color range on the finite values (positive ones for a log scale)"""
+        log = self.scale == "log"
         values = values[np.isfinite(values)]
-        if self.scale_select.value == "log":
+        if log:
             values = values[values > 0]
-        return values
-
-    def _rescale(self):
-        values = self._finite_values()
         if len(values) == 0:
-            low, high = (1.0, 10.0) if self.scale_select.value == "log" else (0.0, 1.0)
+            low, high = (1.0, 10.0) if log else (0.0, 1.0)
         else:
             low, high = float(values.min()), float(values.max())
             if low == high:
-                high = low * 10 if self.scale_select.value == "log" else low + 1
-        # the inputs are not updated here: a change of a widget lays out the whole page again (slow),
-        # they are filled with the current limits when the autoscale is switched off
-        self.display.norm.update(low=low, high=high)
-
-    def _apply_limits(self):
-        if self.autoscale.active:
-            return
-        low, high = self.low_input.value, self.high_input.value
-        if low is None or high is None or high <= low:
-            return
-        if self.scale_select.value == "log" and low <= 0:
-            return
-        self.display.norm.update(low=low, high=high)
-
-    def _set_cmap(self, name):
-        self.display.cmap = name
-
-    def _set_norm(self, norm):
-        self.display.norm = norm
-        if self._color_bar is not None:
-            self._color_bar.color_mapper = self.display.norm
-        if self.autoscale.active:
-            self._rescale()
-        else:
-            self._apply_limits()
-
-    def _set_autoscale(self, active):
-        self.low_input.disabled = active
-        self.high_input.disabled = active
-        if active:
-            self._rescale()
-        else:
-            self.low_input.value, self.high_input.value = self.display.norm.low, self.display.norm.high
-            self._apply_limits()
+                high = low * 10 if log else low + 1
+        if (self.display.norm.low, self.display.norm.high) != (low, high):
+            self.display.norm.update(low=low, high=high)

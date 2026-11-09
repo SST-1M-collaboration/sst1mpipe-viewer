@@ -26,40 +26,51 @@ def refresh_all(session):
 
 def test_all_pages_refresh(subarray):
     store, session = make_session(subarray)
-    assert session.tel_id == 1
-    assert [p.title for p in session.pages] == ["Overview", "R0", "R1", "DL0", "DL1 Event", "DL1 Statistics"]
+    assert session.tel_ids == [1, 2]  # all the telescopes are selected at first
+    assert [p.title for p in session.pages] == ["Array", "R0", "R1", "DL0", "DL1 Event", "DL1 Statistics"]
     refresh_all(session)
     r0, r1 = session.pages[1], session.pages[2]
-    assert r0.message.visible  # no R0 data
-    assert not r1.message.visible
+    # one block per selected telescope
+    assert [view.tel_id for view in r1.views.values()] == [1, 2]
+    assert r0.views[1].message.text  # no R0 data
+    assert not r1.views[1].message.text and r1.views[2].message.text  # R1 of TEL 1 only
     # without selection no waveform is shown (no computation to choose a pixel)
-    assert r1.waveforms.source.data["pixel"] == []
-    # all the fields of the event are in the table
+    assert r1.views[1].waveforms.source.data["pixel"] == []
+    # all the fields of the events are in the table, one column per telescope
     assert {"waveform", "pixel_status", "event_id"} <= set(r1.fields.source.data["name"])
-    # one camera per per-pixel field
-    assert list(r1.field_cameras) == ["pixel_status"]
-    assert session.pages[4].parameters.source.data["name"]
+    # the per pixel fields are chosen in a menu
+    assert r1.pixel_field.options == ["pixel_status"]
+    assert session.pages[4].fields.source.data["name"]
 
 
-def test_selection_navigation_telescope(subarray):
+def test_selection_navigation_telescopes(subarray):
     store, session = make_session(subarray)
     session.set_selected_pixels([3, 4])
     session.pages[2].refresh()
-    assert session.pages[2].waveforms.source.data["pixel"] == ["3", "4"]
+    assert session.pages[2].views[1].waveforms.source.data["pixel"] == ["3", "4"]
 
+    # each telescope has its displayed event
     session.step(-1)
-    assert not session.follow and session.event_key() == (1, 1)
+    assert not session.follow and session.event_key(1) == (1, 1) and session.event_key(2) == (1, 10)
     session.step(-5)
-    assert session.event_key() == (1, 0)
+    assert session.event_key(1) == (1, 0)
     session.set_follow(True)
-    assert session.event_key("dl1") == (1, 2)
+    assert session.event_key(1, "dl1") == (1, 2)
 
-    session.set_tel(2)
-    assert session.selected_pixels == [] and session.tel_select.value == "TEL 2"
+    # telescopes selected in the Array page: the pages show the selected ones
+    session.set_tels([2])
+    assert session.tel_ids == [2]
     refresh_all(session)
-    assert session.pages[2].message.visible  # no R1 for TEL 2
+    assert list(session.pages[2].views_container.children) == [session.pages[2].views[2].layout]
     counters = session.pages[5].counters_source.data
     assert counters["tel"] == ["TEL 2"] and counters["rows"] == [1]
+    session.toggle_tel(1)
+    assert session.tel_ids == [1, 2]
+    refresh_all(session)
+    assert session.pages[5].counters_source.data["tel"] == ["TEL 1", "TEL 2"]
+    # the statistics: one color per telescope
+    histogram = session.pages[5].hist1d[0]
+    assert histogram.renderers[1].glyph.fill_color != histogram.renderers[2].glyph.fill_color
 
 
 def test_without_subarray():
@@ -67,7 +78,7 @@ def test_without_subarray():
     store.push_row("dl1", dl1_row(1))
     session = Browser(store)
     refresh_all(session)
-    assert "geometry" in session.pages[4].message.text
+    assert "geometry" in session.pages[4].views[1].message.text
 
 
 def test_tick_refreshes_only_on_change(subarray):
@@ -92,7 +103,9 @@ def test_components(subarray):
     panel = CameraPanel(geometry)
     panel.set_image(np.arange(geometry.n_pixels, dtype=float))
     assert panel.display.norm.high == geometry.n_pixels - 1
-    panel.scale_select.value = "log"
+    # the color scale is set when the viewer starts
+    panel = CameraPanel(geometry, scale="log")
+    panel.set_image(np.arange(geometry.n_pixels, dtype=float))
     assert panel.display.norm.low == 1
     panel.set_ellipse({"hillas_fov_lon": 0, "hillas_fov_lat": 0, "hillas_length": 1, "hillas_width": 0.5,
                        "hillas_psi": 90})
@@ -110,11 +123,13 @@ def test_components(subarray):
     panel._tapped(Tap(panel.figure, x=x[3], y=y[3], modifiers={"shift": True, "ctrl": False, "alt": False}))
     assert clicked[-1] == [5]
 
-    histogram = Histogram1DPanel("x", log_y=True)
-    histogram.update(dict(edges=np.arange(4.0), counts=np.array([0, 2, 1]), n_entries=3, underflow=0, overflow=0,
-                          n_invalid=0, mean=1.0, std=0.5))
-    assert np.isnan(histogram.source.data["top"][0])
+    histogram = Histogram1DPanel("x", log_y=True, colors={1: "red", 2: "blue"})
+    histogram.update({1: dict(edges=np.arange(4.0), counts=np.array([0, 2, 1]), n_entries=3, underflow=0,
+                              overflow=0, n_invalid=0, mean=1.0, std=0.5)})
+    assert np.isnan(histogram.sources[1].data["top"][0])  # empty bin not drawn
+    assert histogram.captions[1].text.startswith("TEL 1: N=3") and histogram.captions[2].text == ""
     assert histogram.figure.x_range.end == 3
+    assert histogram.renderers[1].visible and not histogram.renderers[2].visible
 
     waveforms = np.arange(6.0).reshape(2, 3)
     assert list(sample_image(waveforms, 1)) == [1, 4]
@@ -129,7 +144,7 @@ def test_server_pages(subarray):
     server = make_server(store, port=0, refresh_period=2000)
     try:
         assert set(server._tornado.applications) == {"/", "/r0", "/r1", "/dl0", "/dl1", "/statistics"}
-        for path, title in (("/", "Overview"), ("/r1", "R1"), ("/statistics", "DL1 Statistics")):
+        for path, title in (("/", "Array"), ("/r1", "R1"), ("/statistics", "DL1 Statistics")):
             doc = Document()
             server._tornado.applications[path].application.initialize_document(doc)
             assert doc.title == f"SST-1M Event Viewer – {title}"
@@ -149,11 +164,11 @@ def test_pages_of_a_browser_share_their_state(subarray):
     overview.set_selected_pixels([3, 4])
     overview.step(-1)
     r1.tick()
-    assert r1.page.waveforms.source.data["pixel"] == ["3", "4"]
+    assert r1.page.views[1].waveforms.source.data["pixel"] == ["3", "4"]
     assert not r1.live.active and r1.live.button_type == "default"
-    overview.set_tel(2)
+    overview.set_tels([2])
     r1.tick()
-    assert r1.tel_select.value == "TEL 2"
+    assert list(r1.page.views_container.children) == [r1.page.views[2].layout]
 
     # the pages of the same client id (in their URL) share a state, other clients have their own
     registry = StateRegistry()
@@ -177,11 +192,10 @@ def test_same_camera_is_not_redrawn(subarray):
 
     store, _ = make_session(subarray)
     session = ViewerSession(store, Document(), page="r1")
-    camera = session.page.camera
+    camera = session.page.views[1].camera
     renderer = camera.display._patches
-    session.set_tel(2)
-    session.page.refresh()
-    assert camera.display._patches is renderer
+    camera.set_geometry(session.geometry(2))
+    assert camera.display._patches is renderer and camera.geometry is session.geometry(2)
     # the selection and the cleaning mask are layers of their pixels only
     camera.set_selected([1, 2])
     assert len(camera._selected_source.data["xs"]) == 2
@@ -198,12 +212,12 @@ def test_file_loaded_after_the_session(subarray):
     assert session.follow
     store.push_table("dl1", Table(rows=[dl1_row(i) for i in range(5)]))
     session.tick()
-    assert not session.follow and session.event_key() == (1, 0)
+    assert not session.follow and session.event_key(1) == (1, 0)
     session.go_to("#-1")
-    assert session.event_key() == (1, 4)
+    assert session.event_key(1) == (1, 4)
     session.go_to("not a number")
     session.tick()
-    assert session.event_key() == (1, 4) and "no event" in session.status.text
+    assert session.event_key(1) == (1, 4) and "no event" in session.status.text
 
 
 def test_stream_keeps_following(subarray):
@@ -212,4 +226,4 @@ def test_stream_keeps_following(subarray):
     session = Browser(store)
     store.push_row("dl1", dl1_row(1))
     session.tick()
-    assert session.follow and session.event_key("dl1") == (1, 1)
+    assert session.follow and session.event_key(1, "dl1") == (1, 1)

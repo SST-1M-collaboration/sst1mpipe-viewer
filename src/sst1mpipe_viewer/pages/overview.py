@@ -1,7 +1,7 @@
 """Overview page: welcome text, telescope array and summary of the data received"""
 
 from bokeh.layouts import column, row
-from bokeh.models import ColumnDataSource, DataTable, Div, RadioButtonGroup, TableColumn
+from bokeh.models import CheckboxGroup, ColumnDataSource, DataTable, Div, RadioButtonGroup, TableColumn
 
 from ..components import ArrayMapPanel, ArrayPanel
 from ..components.array import earth_locations
@@ -14,9 +14,9 @@ __all__ = ["OverviewPage"]
 WELCOME = """
 <h2 style="margin: 0 0 6px 0">Welcome to the SST-1M event viewer</h2>
 <p style="margin: 0 0 4px 0; max-width: 520px">
-The viewer shows the last events received for the telescope chosen at the top of the page
-(<b>R0</b>, <b>R1</b>, <b>DL0</b> and <b>DL1 Event</b> pages) and the statistics accumulated
-from the DL1 parameters (<b>DL1 Statistics</b> page).
+The viewer shows the events of the telescopes selected here (<b>R0</b>, <b>R1</b>, <b>DL0</b> and
+<b>DL1 Event</b> pages) and the statistics accumulated from their DL1 parameters (<b>DL1 Statistics</b>
+page), each telescope with its color.
 </p>
 <ul style="margin: 0; padding-left: 18px; max-width: 520px">
 <li><b>Live</b> follows the last event received; <b>&#9664; Prev</b> / <b>Next &#9654;</b> browse the
@@ -24,14 +24,16 @@ events; <b>Event id</b> shows an event (an event_id, or <i>#index</i>: #0 the fi
 <li>A file is processed at once: its first event is shown and the statistics are those of all its events.</li>
 <li>Click on a camera pixel to show its waveform (shift+click to select several pixels);
 the selection is shared by all the pages.</li>
-<li>Click on a telescope of the array to select it.</li>
+<li>Select the telescopes with the boxes, or click on a telescope of the array to select or unselect it.</li>
 <li>The statistics can be reset globally or plot by plot.</li>
 </ul>
 """
 
 
 class OverviewPage(Page):
-    title = "Overview"
+    """The array of telescopes, the selection of the telescopes and of the pixels, the data received"""
+
+    title = "Array"
 
     def __init__(self, session):
         super().__init__(session)
@@ -49,9 +51,20 @@ class OverviewPage(Page):
         self.summary = DataTable(source=self.summary_source, columns=columns, width=1100, height=110,
                                  index_position=None)
         self.array_container = column(self.message)
+        all_tel_ids = session.all_tel_ids
+        self.telescopes = CheckboxGroup(labels=[f"TEL {t}" for t in all_tel_ids],
+                                        active=[i for i, t in enumerate(all_tel_ids) if t in session.tel_ids],
+                                        inline=True)
+        self._checkbox_tel_ids = all_tel_ids
+        self.telescopes.on_change("active", lambda attr, old, new: self.session.set_tels(
+            [self._checkbox_tel_ids[i] for i in new]))
+        self.telescope_colors = Div(text=" &nbsp; ".join(
+            f"<span style='color: {session.color(t)}; font-weight: bold'>&#9632; TEL {t}</span>" for t in all_tel_ids))
         self.pixel_selection = PixelSelectionPanel(session)
         self.layout = column(
-            row(Div(text=WELCOME, width=540), self.array_container),
+            row(column(Div(text=WELCOME, width=540),
+                       Div(text="<h3 style='margin: 8px 0 0 0'>Selected telescopes</h3>"),
+                       self.telescopes, self.telescope_colors), self.array_container),
             Div(text="<h3 style='margin: 8px 0 0 0'>Data received</h3>"),
             self.summary,
             self.pixel_selection.layout,
@@ -66,10 +79,12 @@ class OverviewPage(Page):
         # the telescopes on an OpenStreetMap map if the subarray has an Earth location, and in the
         # ground frame (ctapipe ArrayDisplay)
         panels = {}
+        colors = {int(t): self.session.color(t) for t in subarray.tel_ids}
         if earth_locations(subarray) is not None:
-            panels["Map (OpenStreetMap)"] = ArrayMapPanel(subarray, on_tel_click=self.session.set_tel,
-                                                          width=560, height=460)
-        panels["Ground frame"] = ArrayPanel(subarray, on_tel_click=self.session.set_tel, width=560, height=460)
+            panels["Map (OpenStreetMap)"] = ArrayMapPanel(subarray, on_tel_click=self.session.toggle_tel,
+                                                          width=560, height=460, colors=colors)
+        panels["Ground frame"] = ArrayPanel(subarray, on_tel_click=self.session.toggle_tel, width=560, height=460,
+                                            colors=colors)
         self.array_panels = panels
         labels = list(panels)
         view = RadioButtonGroup(labels=labels, active=0)
@@ -111,6 +126,10 @@ class OverviewPage(Page):
         self.summary_source.data = self._summary(self.store.counts(), rates)
         self.pixel_selection.refresh()
         active = sorted({tel for (tel, _), rate in rates.items() if rate > 0})
+        selected = self.session.tel_ids
+        active_boxes = [i for i, t in enumerate(self._checkbox_tel_ids) if t in selected]
+        if self.telescopes.active != active_boxes:
+            self.telescopes.active = active_boxes
         for panel in self.array_panels.values():
-            panel.set_selected(self.session.tel_id)
+            panel.set_selected(selected)
             panel.set_active(active)

@@ -2,7 +2,7 @@
 
 import numpy as np
 from astropy.time import Time
-from bokeh.models import ColumnDataSource, DataTable, NumberFormatter, StringFormatter, TableColumn
+from bokeh.models import ColumnDataSource, DataTable, StringFormatter, TableColumn
 from ctapipe.containers import EventType
 
 from ..units import column_unit
@@ -43,38 +43,59 @@ def field_items(row, prefix=""):
             except ValueError:
                 pass
         elif name in TIME_FIELDS and np.isfinite(number):
-            details = Time(number, format="unix", scale="utc").isot
+            # a time: shown as an ISO date only
+            number, details = np.nan, Time(number, format="unix", scale="utc").isot
         items.append((prefix + name, number, details))
     return items
 
 
-class FieldsTable:
-    """Table field / value / details / unit of all the fields of an event"""
+def _text(number, details):
+    """Readable value of a field: the number, and its description (e.g. the name of an event type)"""
+    if np.isfinite(number):
+        text = f"{number:.6g}" if number != int(number) or abs(number) >= 1e15 else str(int(number))
+        return f"{text} ({details})" if details else text
+    return details or "–"
 
-    def __init__(self, width=440, height=560):
-        self.source = ColumnDataSource(data=dict(name=[], value=[], details=[], unit=[]))
-        self.table = DataTable(
-            source=self.source,
-            columns=[
-                TableColumn(field="name", title="Field", width=150),
-                TableColumn(field="value", title="Value", width=110, formatter=NumberFormatter(format="0.[0000]")),
-                TableColumn(field="details", title="Details", width=230, formatter=StringFormatter()),
-                TableColumn(field="unit", title="Unit", width=50),
-            ],
-            width=width, height=height, index_position=None, sortable=True,
-        )
+
+class FieldsTable:
+    """
+    Table of all the fields of the displayed events of the telescopes: one row per field, one
+    column per telescope (value of the scalars, description of the arrays, times, event types)
+    """
+
+    def __init__(self, width=900, height=400):
+        self.source = ColumnDataSource(data=dict(name=[], unit=[]))
+        self.table = DataTable(source=self.source, columns=[], width=width, height=height, index_position=None,
+                               sortable=False)
+        self._tel_ids = None
         self.layout = self.table
 
     def set_rows(self, rows):
-        """Show the fields of rows ``{label: row}`` (the fields of all but the first are prefixed by the label)"""
-        items = []
-        for i, (label, row) in enumerate(rows.items()):
-            items += field_items(row, prefix="" if i == 0 else f"{label}.")
-        data = dict(
-            name=[name for name, _, _ in items],
-            value=[number for _, number, _ in items],
-            details=[details for _, _, details in items],
-            unit=[column_unit(name.split(".")[-1]) for name, _, _ in items],
-        )
+        """
+        Show the fields of the rows of the telescopes ``{tel_id: {label: row}}`` (the fields of all
+        the rows but the first of a telescope are prefixed by their label, e.g. ``trigger.time``)
+        """
+        tel_ids = list(rows)
+        if tel_ids != self._tel_ids:
+            # new columns only when the telescopes change
+            self._tel_ids = tel_ids
+            self.table.columns = (
+                [TableColumn(field="name", title="Field", width=200)]
+                + [TableColumn(field=f"tel_{t}", title=f"TEL {t}", width=260, formatter=StringFormatter())
+                   for t in tel_ids]
+                + [TableColumn(field="unit", title="Unit", width=60)]
+            )
+        values = {}
+        names = []
+        for tel_id, tel_rows in rows.items():
+            for i, (label, row) in enumerate(tel_rows.items()):
+                for name, number, details in field_items(row, prefix="" if i == 0 else f"{label}."):
+                    if name not in values:
+                        values[name] = {}
+                        names.append(name)
+                    values[name][tel_id] = _text(number, details)
+        data = dict(name=names, unit=[column_unit(name.split(".")[-1]) for name in names])
+        for tel_id in tel_ids:
+            data[f"tel_{tel_id}"] = [values[name].get(tel_id, "") for name in names]
         if data != self.source.data:
             self.source.data = data

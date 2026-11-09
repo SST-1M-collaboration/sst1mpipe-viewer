@@ -40,14 +40,21 @@ def _set_range(axis_range, edges):
 
 class Histogram1DPanel:
     """
-    Display of a `~sst1mpipe_viewer.accumulators.Histogram1D` snapshot, with its statistics
-    (entries, mean, std, under/overflow) and a reset button calling ``on_reset``.
+    Display of `~sst1mpipe_viewer.accumulators.Histogram1D` snapshots of several telescopes,
+    superimposed with the color of each telescope, with their statistics (entries, mean, std,
+    under/overflow) and a reset button calling ``on_reset``.
+
+    Parameters
+    ----------
+    colors : dict
+        Color of each telescope ``{tel_id: color}``.
     """
 
-    def __init__(self, name, title=None, x_label=None, log_y=False, on_reset=None, width=330, height=250):
+    def __init__(self, name, title=None, x_label=None, log_y=False, on_reset=None, width=330, height=270,
+                 colors=None):
         self.name = name
         self._ranges_set = False
-        self._state = None
+        self._states = {}
         self.log_y = log_y
         self.figure = figure(
             title=title or name, width=width, height=height, tools=TOOLS, toolbar_location="above",
@@ -56,44 +63,60 @@ class Histogram1DPanel:
         self.figure.xaxis.axis_label = x_label or name
         self.figure.yaxis.axis_label = "entries"
         self.figure.title.text_font_size = "11pt"
-        self.source = ColumnDataSource(data=dict(left=[], right=[], top=[], bottom=[]))
-        self.figure.quad(left="left", right="right", top="top", bottom="bottom", source=self.source,
-                         fill_color=FILL_COLOR, line_color=FILL_COLOR, fill_alpha=0.6)
-        self.stats = add_caption(self.figure)
+        colors = colors or {0: FILL_COLOR}
+        self.sources, self.renderers = {}, {}
+        for tel_id, color in colors.items():
+            source = ColumnDataSource(data=dict(left=[], right=[], top=[], bottom=[]))
+            self.sources[tel_id] = source
+            self.renderers[tel_id] = self.figure.quad(
+                left="left", right="right", top="top", bottom="bottom", source=source, fill_color=color,
+                line_color=color, fill_alpha=0.3, line_width=1.5,
+            )
+        # statistics: one caption per telescope, with its color
+        self.captions = {}
+        for tel_id, color in colors.items():
+            self.captions[tel_id] = add_caption(self.figure)
+            self.captions[tel_id].text_color = color
         self.reset_button = Button(label="Reset", width=60, height=26, button_type="light")
         if on_reset is not None:
             self.reset_button.on_click(lambda: on_reset(self.name))
         self.layout = column(self.figure, row(Spacer(width=width - 70), self.reset_button))
 
     def invalidate(self):
-        """Show the next snapshot even if it looks like the last one"""
-        self._state = None
+        """Show the next snapshots even if they look like the last ones"""
+        self._states = {}
 
-    def update(self, snapshot):
-        """Show a snapshot (nothing is done if it did not change since the last update)"""
-        state = (snapshot["n_entries"], snapshot["n_invalid"], int(np.sum(snapshot["counts"])))
-        if state == self._state:
-            return
-        self._state = state
-        edges = snapshot["edges"]
-        counts = np.asarray(snapshot["counts"], dtype=float)
-        if not self._ranges_set:
-            _set_range(self.figure.x_range, edges)
-            self._ranges_set = True
-        if self.log_y:
-            # empty bins are not drawn on a log scale
-            bottom = np.full_like(counts, 0.5)
+    def update(self, snapshots):
+        """
+        Show the snapshots of the telescopes ``{tel_id: snapshot}`` (the other telescopes are
+        hidden; nothing is sent for a snapshot which did not change since the last update)
+        """
+        for tel_id, source in self.sources.items():
+            renderer = self.renderers[tel_id]
+            snapshot = snapshots.get(tel_id)
+            if renderer.visible != (snapshot is not None):
+                renderer.visible = snapshot is not None
+            text = "" if snapshot is None else (
+                f"TEL {tel_id}: N={snapshot['n_entries']} mean={format_number(snapshot['mean'])}"
+                f" std={format_number(snapshot['std'])} out={snapshot['underflow']}/{snapshot['overflow']}"
+            )
+            if self.captions[tel_id].text != text:
+                self.captions[tel_id].text = text
+            if snapshot is None:
+                continue
+            state = (snapshot["n_entries"], snapshot["n_invalid"], int(np.sum(snapshot["counts"])))
+            if state == self._states.get(tel_id):
+                continue
+            self._states[tel_id] = state
+            edges = snapshot["edges"]
+            counts = np.asarray(snapshot["counts"], dtype=float)
+            if not self._ranges_set:
+                _set_range(self.figure.x_range, edges)
+                self._ranges_set = True
+            # the empty bins are not drawn (no flat line over the histograms of the other telescopes)
+            bottom = np.full_like(counts, 0.5 if self.log_y else 0.0)
             top = np.where(counts > 0, counts, np.nan)
-        else:
-            bottom = np.zeros_like(counts)
-            top = counts
-        self.source.data = dict(left=edges[:-1], right=edges[1:], top=top, bottom=bottom)
-        self.stats.text = (
-            f"N={snapshot['n_entries']}  mean={format_number(snapshot['mean'])}"
-            f"  std={format_number(snapshot['std'])}"
-            f"  under/over={snapshot['underflow']}/{snapshot['overflow']}"
-            + (f"  invalid={snapshot['n_invalid']}" if snapshot["n_invalid"] else "")
-        )
+            source.data = dict(left=edges[:-1], right=edges[1:], top=top, bottom=bottom)
 
 
 class Histogram2DPanel:

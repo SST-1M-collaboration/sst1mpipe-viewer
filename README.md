@@ -7,27 +7,30 @@ their DL1 parameters, based on [ctapipe](https://github.com/cta-observatory/ctap
 
 ## Pages
 
-One web page per data level, at `http://<host>:5006/` + `/` (Overview), `/r0`, `/r1`, `/dl0`,
+One web page per data level, at `http://<host>:5006/` + `/` (Array), `/r0`, `/r1`, `/dl0`,
 `/dl1` (DL1 Event), `/statistics` (DL1 Statistics), linked by the navigation bar at the top. The
-pages opened by a browser share the selected telescope, the displayed event and the selected
+pages opened by a browser share the selected telescopes, the displayed event and the selected
 pixels (the client id `?c=...` of the links): going from a page to another keeps the context.
 
 | Page | Content |
 |---|---|
-| **Overview** | Telescopes on an OpenStreetMap map at their Earth location (or in the ground frame), data received per telescope and data level; **pixel selection by group** of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
-| **R0 / R1 / DL0** | Every field of the data: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 10 pixels), one camera per per-pixel field (e.g. `pixel_flags`, `pixel_status`); for the R0 of DigiCam, the baseline (`pedestal`) camera and dashed lines on the waveforms, and the **trigger traces per trigger patch** (camera of the 432 triplets of pixels at the selected sample, traces of the patches of the selected pixels); the list of all the fields (values, shapes of the arrays, times, event types) |
-| **DL1 Event** | Image and peak time with the cleaning mask and the Hillas ellipse, the list of all the DL1 and trigger fields |
-| **DL1 Statistics** | Accumulated histograms of the DL1 parameters, correlations, camera maps (fraction of events in which a pixel survives the cleaning, mean charge), with cuts and reset buttons (per plot, per telescope, all) |
+| **Array** | **Selection of the telescopes** (check boxes, or click on a telescope of the map), each with its color; telescopes on an OpenStreetMap map at their Earth location (or in the ground frame), data received per telescope and data level; **pixel selection by group** of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
+| **R0 / R1 / DL0** | One block per selected telescope: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 10 pixels), the camera of a per-pixel field chosen in a menu (fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms, and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels at the selected sample, traces of the patches of the selected pixels); the table of all the fields (one column per telescope: values, shapes of the arrays, times, event types) of all the fields (values, shapes of the arrays, times, event types) |
+| **DL1 Event** | Per selected telescope: image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse, the list of all the DL1 and trigger fields |
+| **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope (the colors of the Array page), correlations, camera maps (fraction of events in which a pixel survives the cleaning, mean charge), with cuts and reset buttons (per plot, per telescope, all) |
 
 The viewer only reads the data as defined in the ctapipe / sst1mpipe containers: the cameras show
 the values of a field (or of a sample of the waveforms), without computation.
 
-The telescope is chosen at the top of the page. A click on a camera pixel selects it on all the
+The telescopes are selected in the Array page only: every page shows the selected telescopes. A click on a camera pixel selects it on all the
 pages (shift+click adds or removes a pixel). The displayed event is chosen in the header:
 
 - **Live**: the last event received (data pushed event by event, e.g. a stream);
 - **◀ Prev** / **Next ▶**: the previous / next event;
 - **Event id**: an `event_id`, or `#index` for the index of the event (`#0` the first, `#-1` the last).
+
+The color maps are not chosen in the pages (lighter pages) but on the command line: `--colormap`
+(waveform and image cameras), `--field-colormap` (per-pixel fields), `--color-scale lin|log`.
 
 ## Installation
 
@@ -105,8 +108,16 @@ Pushing an event is cheap, so that the viewer follows streams of more than 1 kHz
   are converted to the telescope frame in these batches, and for the displayed event only;
 - the R0, R1 and DL0 containers are converted only if their event is displayed (they must not be
   modified after being pushed: the ctapipe event sources create new containers for each event);
-- the displays are refreshed every second with the last event (the events in between are not
-  drawn), the statistics every 2 s (`--refresh-period`, `--statistics-period`).
+- the page checks for new data every 250 ms (`--refresh-period`); the displayed event is
+  redrawn at most every 0.5 s with the last event (the events in between are not drawn,
+  `--event-period`), the statistics every 2 s (`--statistics-period`); every histogram entry is
+  counted;
+- a user action (click, menu, Prev / Next) is applied at once, without waiting for the next
+  refresh; the changes of a refresh are sent to the browser in one message.
+
+At 1 kHz the feed thread and the bokeh server share the Python interpreter (GIL): the Python work
+of a refresh takes several times longer than without data. Running the ingest (reading the
+stream, filling the statistics) in a separate process would remove this contention.
 
 Measured with the Mrk 421 file replayed at 1 kHz (`--replay-rate 1000 --loop`): the rate is held
 with about 40 % of a CPU core for the server; `push_event` of calibrated ctapipe events takes
