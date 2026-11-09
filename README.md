@@ -14,16 +14,16 @@ pixels (the client id `?c=...` of the links): going from a page to another keeps
 
 | Page | Content |
 |---|---|
-| **Array** | **Selection of the telescopes** (check boxes, or click on a telescope of the map), each with its color; telescopes on an OpenStreetMap map at their Earth location (or in the ground frame), data received per telescope and data level; **pixel selection by group** of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
-| **R0 / R1 / DL0** | One block per selected telescope: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 10 pixels), the camera of a per-pixel field chosen in a menu (fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms, and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels at the selected sample, traces of the patches of the selected pixels); the table of all the fields (one column per telescope: values, shapes of the arrays, times, event types) of all the fields (values, shapes of the arrays, times, event types) |
-| **DL1 Event** | Per selected telescope: image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse, the list of all the DL1 and trigger fields |
+| **Array** | **Selection of the telescopes** (check boxes, or click on a telescope of the map), each with its color; telescopes on an OpenStreetMap map at their Earth location (or in the ground frame), data received per telescope and data level; **pixel selection by group per telescope** (each telescope has its own selection) of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
+| **R0 / R1 / DL0** | One block per selected telescope, with its own ◀ / ▶ (events of this telescope only) and its own **sample** slider, common to the waveform camera and the trigger traces: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 10 pixels), the camera of a per-pixel field chosen in a menu (fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms, and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels at the selected sample, traces of the patches of the selected pixels); the table of all the fields (one column per telescope: values, shapes of the arrays, times, event types) of all the fields (values, shapes of the arrays, times, event types) |
+| **DL1 Event** | Per selected telescope (with its own ◀ / ▶): image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse, the list of all the DL1 and trigger fields |
 | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope (the colors of the Array page), correlations, camera maps (fraction of events in which a pixel survives the cleaning, mean charge), with cuts and reset buttons (per plot, per telescope, all) |
 
 The viewer only reads the data as defined in the ctapipe / sst1mpipe containers: the cameras show
 the values of a field (or of a sample of the waveforms), without computation.
 
-The telescopes are selected in the Array page only: every page shows the selected telescopes. A click on a camera pixel selects it on all the
-pages (shift+click adds or removes a pixel). The displayed event is chosen in the header:
+The telescopes are selected in the Array page only: every page shows the selected telescopes. A click on a camera pixel selects it for its telescope on all the
+pages (shift+click adds or removes a pixel); each telescope has its own selection. The displayed event is chosen in the header:
 
 - **Live**: the last event received (data pushed event by event, e.g. a stream);
 - **◀ Prev** / **Next ▶**: the previous / next event;

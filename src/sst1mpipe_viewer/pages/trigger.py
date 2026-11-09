@@ -61,7 +61,8 @@ class TriggerView:
         patches = patch_geometry(geometry)
         if patches is None:
             return
-        select_group(self.session, self.groups.pixels(geometry, "patch", [int(patches.pix_id[patch])]), shift)
+        select_group(self.session, self.tel_id, self.groups.pixels(geometry, "patch", [int(patches.pix_id[patch])]),
+                     shift)
 
     def clear(self):
         self.camera.clear()
@@ -77,13 +78,14 @@ class TriggerView:
         from .waveforms import sample_image
 
         traces = np.asarray(data[trace], dtype=float)
+        sample = min(int(sample), traces.shape[1] - 1)
         self._pixel_geometry = geometry
         self.camera.set_geometry(patches)
         self.camera.set_image(sample_image(traces, sample))
         self.camera.set_title(f"{trace} sample {sample}")
         self.camera.set_caption(TRACE_FIELDS[trace])
         # patches of the selected pixels (index in the patch geometry = position of their patch_sw_id)
-        selected = self.session.selected_pixels
+        selected = self.session.selected_pixels(self.tel_id)
         patch_ids = self.groups.groups(geometry, "patch", selected) if selected else []
         indices = np.searchsorted(patches.pix_id, patch_ids).tolist()
         self.camera.set_selected(indices)

@@ -71,3 +71,16 @@ class Page:
 
     def refresh(self):
         raise NotImplementedError
+
+
+def telescope_header(session, tel_id):
+    """Header of the block of a telescope in a page: its name in its color, its own Prev / Next"""
+    from bokeh.layouts import row
+    from bokeh.models import Button, Div
+
+    title = Div(text=f"<h3 style='margin: 4px 0 0 0; color: {session.color(tel_id)}'>TEL {tel_id}</h3>", width=70)
+    prev_button = Button(label="◀", width=36, height=28)
+    next_button = Button(label="▶", width=36, height=28)
+    prev_button.on_click(lambda: session.step(-1, [tel_id]))
+    next_button.on_click(lambda: session.step(+1, [tel_id]))
+    return row(title, prev_button, next_button)

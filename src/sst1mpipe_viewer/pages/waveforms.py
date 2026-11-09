@@ -6,7 +6,7 @@ from bokeh.models import Div, Select, Slider
 
 from ..components import FieldsTable, WaveformPanel
 from ..components.waveform import waveform_2d
-from .base import Page, event_description, message_div
+from .base import Page, event_description, message_div, telescope_header
 from .trigger import TRACE_FIELDS, TriggerView, trace_fields
 
 __all__ = ["WaveformPage", "field_shapes", "sample_image"]
@@ -67,22 +67,33 @@ class _TelescopeWaveforms:
     def __init__(self, page, tel_id):
         session = page.session
         self.session, self.page, self.tel_id = session, page, tel_id
-        color = session.color(tel_id)
-        self.header = Div(text=f"<h3 style='margin: 8px 0 0 0; color: {color}'>TEL {tel_id}</h3>", width=120)
+        self.header = telescope_header(session, tel_id)
         self.message = message_div()
-        self.camera = session.camera_panel(title="Waveforms", on_pixel_click=session.set_selected_pixels,
+        # the sample of the waveforms and of the trigger traces shown in the cameras (per telescope)
+        self.sample = Slider(title="Sample", start=0, end=1, value=0, step=1, width=400)
+        self.sample.on_change("value_throttled", lambda attr, old, new: page.refresh())
+        self.camera = session.camera_panel(title="Waveforms", on_pixel_click=session.pixel_click(tel_id),
                                            width=400, height=370)
         self.waveforms = WaveformPanel(title="Waveforms", y_label=WAVEFORM_UNITS.get(page.kind, ""), width=520,
                                        height=370)
         self.field_camera = session.camera_panel(title="Pixel field", cmap=session.field_colormap,
-                                                 on_pixel_click=session.set_selected_pixels, width=400, height=370)
+                                                 on_pixel_click=session.pixel_click(tel_id), width=400,
+                                                 height=370)
         self.trigger = TriggerView(session, tel_id) if page.kind == "r0" else None
-        rows = [row(self.header, self.message),
+        rows = [row(self.header, self.sample, self.message),
                 row(self.camera.layout, self.waveforms.layout, self.field_camera.layout)]
         if self.trigger is not None:
             rows.append(row(self.trigger.layout, self.trigger.traces.layout))
         self.layout = column(*rows)
         self.shown = False  # an event is displayed
+
+    def set_sample_range(self, n_samples):
+        """Range of the sample slider: the samples of the waveforms and of the trigger traces"""
+        end = max(n_samples - 1, 1)
+        if self.sample.end != end:
+            self.sample.end = end
+            if self.sample.value > end:
+                self.sample.value = end
 
     def _show_message(self, text):
         if self.message.text != text:
@@ -105,13 +116,13 @@ class _TelescopeWaveforms:
         self.camera.set_caption(event_description(key, rows))
         self.camera.set_geometry(geometry)
         self.field_camera.set_geometry(geometry)
-        pixels = session.selected_pixels
+        pixels = session.selected_pixels(self.tel_id)
         channel = int(page.channel.value)
 
         name = page.waveform_field.value
         if name in data:
             waveforms = waveform_2d(np.asarray(data[name]), channel)
-            sample = min(page.sample.value, waveforms.shape[1] - 1)
+            sample = min(self.sample.value, waveforms.shape[1] - 1)
             self.camera.set_title(f"{name} sample {sample}")
             self.camera.set_image(sample_image(waveforms, sample))
             self.camera.set_selected(pixels)
@@ -137,12 +148,13 @@ class _TelescopeWaveforms:
             self.field_camera.clear()
 
         if self.trigger is not None:
-            self.trigger.update(data, geometry, page.trace.value, page.trace_sample.value)
+            self.trigger.update(data, geometry, page.trace.value, self.sample.value)
 
 
 class WaveformPage(Page):
     """
-    The events of the selected telescopes (one block per telescope, with its color): camera of a
+    The events of the selected telescopes (one block per telescope, with its color, its own
+    Prev / Next and its own sample, common to the waveforms and the trigger traces): camera of a
     sample of the waveforms, waveforms of the selected pixels, camera of a per pixel field, and for
     the R0 of DigiCam the trigger traces per trigger patch; the fields of the same shape are chosen
     in a menu, common to the telescopes. The table has all the fields of the events. The layout only
@@ -153,20 +165,16 @@ class WaveformPage(Page):
         super().__init__(session)
         self.kind = kind
         self.title = kind.upper()
-        self.sample = Slider(title="Sample shown in the cameras", start=0, end=1, value=0, step=1, width=320)
         self.channel = Select(title="Gain channel", value="0", options=["0"], width=100)
         self.waveform_field = Select(title="Waveforms", value="waveform", options=["waveform"], width=180)
         self.pixel_field = Select(title="Pixel field", value="", options=[], width=200)
         self.trace = Select(title="Trigger trace", value="trigger_input_traces", options=list(TRACE_FIELDS),
                             width=210)
-        self.trace_sample = Slider(title="Trigger sample", start=0, end=1, value=0, step=1, width=320)
         for widget in (self.channel, self.waveform_field, self.pixel_field, self.trace):
             widget.on_change("value", lambda attr, old, new: self.refresh())
-        for slider in (self.sample, self.trace_sample):
-            slider.on_change("value_throttled", lambda attr, old, new: self.refresh())
-        controls = [self.waveform_field, self.sample, self.channel, self.pixel_field]
+        controls = [self.waveform_field, self.channel, self.pixel_field]
         if kind == "r0":
-            controls += [self.trace, self.trace_sample]
+            controls += [self.trace]
         self.views = {tel_id: _TelescopeWaveforms(self, tel_id) for tel_id in session.all_tel_ids}
         self.views_container = column()
         self.fields = FieldsTable(width=1000, height=400)
@@ -206,19 +214,17 @@ class WaveformPage(Page):
         set_options(self.pixel_field, _union(e[4]["pixel"] for e in shown.values()))
         if self.kind == "r0":
             set_options(self.trace, _union(trace_fields(e[2]) for e in shown.values()) or list(TRACE_FIELDS))
-        n_channels, n_samples, n_trace_samples = 1, 1, 1
-        for _, _, data, _, _ in shown.values():
-            waveform = np.asarray(data[self.waveform_field.value]) if self.waveform_field.value in data else None
-            if waveform is not None:
-                n_channels = max(n_channels, waveform.shape[0] if waveform.ndim == 3 else 1)
-                n_samples = max(n_samples, waveform.shape[-1])
-            if self.trace.value in data:
-                n_trace_samples = max(n_trace_samples, np.shape(data[self.trace.value])[-1])
+        n_channels = 1
+        for tel_id, (_, _, data, _, _) in shown.items():
+            n_samples = 1
+            if self.waveform_field.value in data:
+                shape = np.shape(data[self.waveform_field.value])
+                n_channels = max(n_channels, shape[0] if len(shape) == 3 else 1)
+                n_samples = shape[-1]
+            if self.kind == "r0" and self.trace.value in data:
+                n_samples = max(n_samples, np.shape(data[self.trace.value])[-1])
+            self.views[tel_id].set_sample_range(n_samples)
         set_options(self.channel, [str(i) for i in range(n_channels)])
-        for slider, n in ((self.sample, n_samples), (self.trace_sample, n_trace_samples)):
-            if slider.end != max(n - 1, 1):
-                slider.end = max(n - 1, 1)
-                slider.value = min(slider.value, n - 1)
 
         table = {}
         for tel_id, (key, rows, data, geometry, shapes) in events.items():

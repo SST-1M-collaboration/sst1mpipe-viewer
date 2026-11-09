@@ -7,7 +7,7 @@ from bokeh.models import Button, CheckboxGroup, ColumnDataSource, DataTable, Div
 from ..components import FieldsTable, Histogram1DPanel, Histogram2DPanel
 from ..config import display_options
 from ..units import column_unit
-from .base import Page, event_description, message_div
+from .base import Page, event_description, message_div, telescope_header
 from .waveforms import field_shapes, set_options
 
 __all__ = ["DL1EventPage", "DL1StatisticsPage"]
@@ -19,10 +19,9 @@ class _TelescopeImage:
     """Camera of the DL1 event of a telescope"""
 
     def __init__(self, session, tel_id):
-        color = session.color(tel_id)
-        self.header = Div(text=f"<h3 style='margin: 8px 0 0 0; color: {color}'>TEL {tel_id}</h3>", width=120)
+        self.header = telescope_header(session, tel_id)
         self.message = message_div()
-        self.camera = session.camera_panel(title="Image", on_pixel_click=session.set_selected_pixels, width=460,
+        self.camera = session.camera_panel(title="Image", on_pixel_click=session.pixel_click(tel_id), width=460,
                                            height=430)
         self.layout = column(row(self.header, self.message), self.camera.layout)
         self.shown = False
@@ -114,7 +113,7 @@ class DL1EventPage(Page):
                 camera.clear()
             camera.set_mask(data.get("image_mask") if show_mask else None)
             camera.set_ellipse(data if show_ellipse else None)
-            camera.set_selected(session.selected_pixels)
+            camera.set_selected(session.selected_pixels(tel_id))
             table[tel_id] = {"dl1": data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
         self.fields.set_rows(table)
 
@@ -170,7 +169,8 @@ class DL1StatisticsPage(Page):
         self.camera_map.on_change("value", lambda attr, old, new: self._refresh_maps(force=True))
         self.maps = {}
         for tel_id in all_tel_ids:
-            panel = session.camera_panel(title="", on_pixel_click=session.set_selected_pixels, width=420, height=380)
+            panel = session.camera_panel(title="", on_pixel_click=session.pixel_click(tel_id), width=420,
+                                         height=380)
             panel.figure.title.text_color = colors[tel_id]
             self.maps[tel_id] = panel
         self._map_states = {}
@@ -295,4 +295,4 @@ class DL1StatisticsPage(Page):
                 panel.set_image(accumulator["values"])
                 panel.set_title(f"{self.map_titles.get(name, name)} – TEL {tel_id}")
                 panel.set_caption(f"N={accumulator['n_entries']}")
-            panel.set_selected(session.selected_pixels)
+            panel.set_selected(session.selected_pixels(tel_id))

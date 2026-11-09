@@ -23,7 +23,8 @@ page), each telescope with its color.
 events; <b>Event id</b> shows an event (an event_id, or <i>#index</i>: #0 the first event, #-1 the last).</li>
 <li>A file is processed at once: its first event is shown and the statistics are those of all its events.</li>
 <li>Click on a camera pixel to show its waveform (shift+click to select several pixels);
-the selection is shared by all the pages.</li>
+each telescope has its own selection, shared by all the pages.</li>
+<li>&#9664; / &#9654; next to a telescope name browse the events of this telescope only.</li>
 <li>Select the telescopes with the boxes, or click on a telescope of the array to select or unselect it.</li>
 <li>The statistics can be reset globally or plot by plot.</li>
 </ul>
@@ -60,14 +61,17 @@ class OverviewPage(Page):
             [self._checkbox_tel_ids[i] for i in new]))
         self.telescope_colors = Div(text=" &nbsp; ".join(
             f"<span style='color: {session.color(t)}; font-weight: bold'>&#9632; TEL {t}</span>" for t in all_tel_ids))
-        self.pixel_selection = PixelSelectionPanel(session)
+        # one pixel selection per telescope (each telescope has its own selection)
+        self.pixel_selections = {}
+        self.pixel_container = column()
+        self._shown_tel_ids = None
         self.layout = column(
             row(column(Div(text=WELCOME, width=540),
                        Div(text="<h3 style='margin: 8px 0 0 0'>Selected telescopes</h3>"),
                        self.telescopes, self.telescope_colors), self.array_container),
             Div(text="<h3 style='margin: 8px 0 0 0'>Data received</h3>"),
             self.summary,
-            self.pixel_selection.layout,
+            self.pixel_container,
         )
 
     def _build_array(self, subarray):
@@ -124,7 +128,15 @@ class OverviewPage(Page):
             self._build_array(self.store.subarray)
         rates = self.store.rates()
         self.summary_source.data = self._summary(self.store.counts(), rates)
-        self.pixel_selection.refresh()
+        selected_tels = self.session.tel_ids
+        for tel_id in selected_tels:
+            if tel_id not in self.pixel_selections:
+                self.pixel_selections[tel_id] = PixelSelectionPanel(self.session, tel_id)
+        if selected_tels != self._shown_tel_ids:
+            self._shown_tel_ids = selected_tels
+            self.pixel_container.children = [self.pixel_selections[t].layout for t in selected_tels]
+        for tel_id in selected_tels:
+            self.pixel_selections[tel_id].refresh()
         active = sorted({tel for (tel, _), rate in rates.items() if rate > 0})
         selected = self.session.tel_ids
         active_boxes = [i for i, t in enumerate(self._checkbox_tel_ids) if t in selected]

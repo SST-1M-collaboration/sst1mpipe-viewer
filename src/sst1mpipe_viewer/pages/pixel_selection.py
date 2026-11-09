@@ -13,24 +13,24 @@ HELP = """
 <p style="margin: 0; max-width: 300px">
 Choose how the pixels are grouped, then click on the camera to select the pixels of a group
 (shift+click adds or removes a group), or enter the ids of groups (e.g. <i>0, 3-5</i>).
-The selection is shared by all the pages (waveforms, cameras).
+Each telescope has its own selection, shared by all the pages (waveforms, cameras).
 </p>
 """
 
 
-def select_group(session, pixels, shift):
+def select_group(session, tel_id, pixels, shift):
     """
-    Select the pixels of a group in the session: replace the selection, or with ``shift`` add the
+    Select the pixels of a group of a telescope: replace its selection, or with ``shift`` add the
     group (remove it if all its pixels are selected)
     """
-    selected = list(session.selected_pixels)
+    selected = list(session.selected_pixels(tel_id))
     if not shift:
         selected = list(pixels)
     elif set(pixels) <= set(selected):
         selected = [p for p in selected if p not in set(pixels)]
     else:
         selected = sorted(set(selected) | set(pixels))
-    session.set_selected_pixels(selected)
+    session.set_selected_pixels(selected, tel_id)
 
 
 def _colors(group_ids):
@@ -39,10 +39,11 @@ def _colors(group_ids):
 
 
 class PixelSelectionPanel:
-    """Camera colored by group of pixels: a click selects all the pixels of a group"""
+    """Camera of a telescope colored by group of pixels: a click selects all the pixels of a group"""
 
-    def __init__(self, session):
+    def __init__(self, session, tel_id):
         self.session = session
+        self.tel_id = tel_id
         self.groups = pixel_groups()
         self.grouping = Select(title="Select pixels by", value="Module", options=list(GROUPINGS), width=170)
         self.grouping.on_change("value", lambda attr, old, new: self.refresh(force=True))
@@ -58,7 +59,8 @@ class PixelSelectionPanel:
         self._state = None
         self._info_state = None
         self.layout = row(
-            column(Div(text="<h3 style='margin: 8px 0 0 0'>Pixel selection</h3>"), Div(text=HELP),
+            column(Div(text=f"<h3 style='margin: 8px 0 0 0; color: {session.color(tel_id)}'>"
+                            f"Pixel selection of TEL {tel_id}</h3>"), Div(text=HELP),
                    self.grouping, self.ids, self.add, self.info, self.message),
             self.camera.layout,
         )
@@ -67,13 +69,8 @@ class PixelSelectionPanel:
     def column(self):
         return GROUPINGS[self.grouping.value]
 
-    def _tel_id(self):
-        """Telescope whose camera is shown: the first selected one (the cameras are the same)"""
-        tel_ids = self.session.tel_ids or self.session.all_tel_ids
-        return tel_ids[0] if tel_ids else None
-
     def _geometry(self):
-        geometry = self.session.geometry(self._tel_id())
+        geometry = self.session.geometry(self.tel_id)
         return geometry if self.groups.matches(geometry) else None
 
     def tapped(self, pixel, shift):
@@ -82,7 +79,7 @@ class PixelSelectionPanel:
         if geometry is None:
             return
         group = self.groups.group_of(geometry, self.column, pixel)
-        select_group(self.session, self.groups.pixels(geometry, self.column, [group]), shift)
+        select_group(self.session, self.tel_id, self.groups.pixels(geometry, self.column, [group]), shift)
 
     def select_ids(self, text, add=False):
         """Select the pixels of the groups whose ids are in ``text``"""
@@ -102,8 +99,8 @@ class PixelSelectionPanel:
             # only unknown ids: the selection is kept
             return
         if add:
-            pixels = sorted(set(self.session.selected_pixels) | set(pixels))
-        self.session.set_selected_pixels(pixels)
+            pixels = sorted(set(self.session.selected_pixels(self.tel_id)) | set(pixels))
+        self.session.set_selected_pixels(pixels, self.tel_id)
 
     def refresh(self, force=False):
         geometry = self._geometry()
@@ -115,16 +112,16 @@ class PixelSelectionPanel:
         self.camera.layout.visible = True
         if self.message.text.startswith("The pixel groups"):
             self.message.text = ""
-        state = (self._tel_id(), self.column)
+        state = (self.tel_id, self.column)
         values = self.groups.values(geometry, self.column)
         if force or state != self._state:
             self._state = state
             self.camera.set_geometry(geometry)
             self.camera.set_image(_colors(values))
             self.camera.set_hover_column(self.grouping.value, values)
-            self.camera.set_title(f"{self.grouping.value}s of TEL {self._tel_id()}"
+            self.camera.set_title(f"{self.grouping.value}s of TEL {self.tel_id}"
                                   f" ({len(np.unique(values))} groups)")
-        selected = self.session.selected_pixels
+        selected = self.session.selected_pixels(self.tel_id)
         self.camera.set_selected(selected)
         info_state = (state, tuple(selected))
         if info_state == self._info_state:

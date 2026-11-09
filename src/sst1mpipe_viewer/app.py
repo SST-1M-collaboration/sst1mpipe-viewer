@@ -60,8 +60,8 @@ class UserState:
     """
     Navigation state of a browser, shared by its pages: the selected telescopes, the displayed
     event of each telescope (``follow`` the last ones, or ``event_keys[tel_id]``) and the selected
-    pixels. ``version`` is incremented at each change, so that the other pages of the browser
-    follow it.
+    pixels of each telescope (``selected_pixels[tel_id]``). ``version`` is incremented at each
+    change, so that the other pages of the browser follow it.
     """
 
     def __init__(self, store):
@@ -73,7 +73,7 @@ class UserState:
         self.event_keys = {} if self.follow else first
         # without data yet: go to the first events if the data come as tables (a file being loaded)
         self.auto_browse = self.follow and not store.has_event_data
-        self.selected_pixels = []
+        self.selected_pixels = {}  # {tel_id: [pixel, ...]}
         self.goto_error = None
         self.version = 0
 
@@ -130,7 +130,7 @@ class ViewerSession:
         self.event_input = TextInput(title="Event id", value="", width=130, placeholder="event_id or #index")
         self.event_input.on_change("value", lambda attr, old, new: self.go_to(new))
         self.clear_pixels = Button(label="Clear pixel selection", width=150)
-        self.clear_pixels.on_click(lambda: self.set_selected_pixels([]))
+        self.clear_pixels.on_click(self.clear_selected_pixels)
         self.status = Div(text="", styles={"font-size": "10pt", "color": "#444"}, width=1400, height=40)
 
         _, title, factory = PAGES[page]
@@ -195,9 +195,9 @@ class ViewerSession:
     def follow(self):
         return self.state.follow
 
-    @property
-    def selected_pixels(self):
-        return self.state.selected_pixels
+    def selected_pixels(self, tel_id):
+        """The selected pixels of a telescope"""
+        return self.state.selected_pixels.get(tel_id, [])
 
     def _changed(self):
         self.state.changed()
@@ -304,11 +304,11 @@ class ViewerSession:
         self._update_header()
         self._changed()
 
-    def step(self, offset):
-        """Show the previous (-1) or next (+1) event of each selected telescope"""
+    def step(self, offset, tel_ids=None):
+        """Show the previous (-1) or next (+1) event of each selected telescope (or of ``tel_ids``)"""
         self._browse()
         state = self.state
-        for tel_id in self.tel_ids:
+        for tel_id in self.tel_ids if tel_ids is None else tel_ids:
             keys = self.store.event_keys(tel_id)
             if not keys:
                 continue
@@ -318,12 +318,23 @@ class ViewerSession:
         self.set_follow(False)
 
     # --------------------------------------------------------------- pixels
-    def set_selected_pixels(self, pixels):
+    def set_selected_pixels(self, pixels, tel_id):
+        """Select pixels of a telescope (each telescope has its own selection)"""
         pixels = [int(p) for p in pixels]
-        if pixels == self.state.selected_pixels:
+        if pixels == self.selected_pixels(tel_id):
             return
-        self.state.selected_pixels = pixels
+        self.state.selected_pixels[tel_id] = pixels
         self._changed()
+
+    def pixel_click(self, tel_id):
+        """Callback of a click on the pixels of a camera of a telescope"""
+        return lambda pixels: self.set_selected_pixels(pixels, tel_id)
+
+    def clear_selected_pixels(self):
+        """Unselect the pixels of all the telescopes"""
+        if any(self.state.selected_pixels.values()):
+            self.state.selected_pixels = {}
+            self._changed()
 
     # -------------------------------------------------------------- refresh
     def request_refresh(self):
@@ -412,18 +423,18 @@ class ViewerSession:
                 position, n_events = self.store.event_position(tel_id, key)
                 event = f"event_id {key[1]}" if key else "no event"
                 label += f" {event} ({'?' if position is None else position + 1} / {n_events})"
+            pixels = self.selected_pixels(tel_id)
+            if len(pixels) > 10:
+                label += f" [{len(pixels)} pixels]"
+            elif pixels:
+                label += f" [pixels {', '.join(str(p) for p in pixels)}]"
             telescopes.append(label)
         mode = "following the last events" if state.follow else "browsing"
         if state.goto_error:
             mode += f" &nbsp;<span style='color: #c62828'>{state.goto_error}</span>"
-        n_selected = len(state.selected_pixels)
-        if n_selected > 10:
-            pixels = f"{n_selected} pixels"
-        else:
-            pixels = ", ".join(str(p) for p in state.selected_pixels) or "none"
         return (
             f"<b>Source</b>: {source} &nbsp;|&nbsp; {' &nbsp; '.join(telescopes) or 'no telescope selected'}"
-            f" &nbsp;|&nbsp; {mode} &nbsp;|&nbsp; <b>selected pixels</b>: {pixels}"
+            f" &nbsp;|&nbsp; {mode}"
         )
 
 

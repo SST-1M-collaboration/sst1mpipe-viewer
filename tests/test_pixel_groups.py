@@ -59,30 +59,32 @@ def test_groups_are_contiguous_in_the_camera_of_the_data(digicam, column):
 def test_selection_by_group(digicam):
     store = ViewerStore(digicam)
     session = Browser(store)
-    panel = session.pages[0].pixel_selection
     session.pages[0].refresh()
+    tel_id = session.tel_ids[0]
+    # one pixel selection per telescope
+    panel = session.pages[0].pixel_selections[tel_id]
     assert panel.camera.layout.visible
 
     # a click selects the module of the pixel, shift+click adds / removes a module
     panel.grouping.value = "Module"
     panel.tapped(0, shift=False)
-    first = list(session.selected_pixels)
+    first = list(session.selected_pixels(tel_id))
     assert len(first) == 12 and 0 in first
     other = next(p for p in range(1296) if p not in first)
     panel.tapped(other, shift=True)
-    assert len(session.selected_pixels) == 24
+    assert len(session.selected_pixels(tel_id)) == 24
     panel.tapped(0, shift=True)
-    assert len(session.selected_pixels) == 12 and 0 not in session.selected_pixels
+    assert len(session.selected_pixels(tel_id)) == 12 and 0 not in session.selected_pixels(tel_id)
 
     # ids of sectors
     panel.grouping.value = "Sector"
     panel.select_ids("1-2")
-    assert len(session.selected_pixels) == 864
+    assert len(session.selected_pixels(tel_id)) == 864
     panel.select_ids("3", add=True)
-    assert len(session.selected_pixels) == 1296
+    assert len(session.selected_pixels(tel_id)) == 1296
     panel.select_ids("9")
     assert "Unknown sector ids: [9]" in panel.message.text
-    assert len(session.selected_pixels) == 1296  # unknown ids only: selection kept
+    assert len(session.selected_pixels(tel_id)) == 1296  # unknown ids only: selection kept
     session.pages[0].refresh()
     assert "1296 pixels selected" in panel.info.text and "complete sectors: 1, 2, 3" in panel.info.text
     panel.select_ids("2")
@@ -95,10 +97,10 @@ def test_not_digicam(subarray):
     """Other cameras: the group selection is not available"""
     session = Browser(ViewerStore(subarray))
     session.pages[0].refresh()
-    panel = session.pages[0].pixel_selection
+    panel = session.pages[0].pixel_selections[1]
     assert not panel.camera.layout.visible and "not available" in panel.message.text
     panel.tapped(0, shift=False)
-    assert session.selected_pixels == []
+    assert session.selected_pixels(1) == []
 
 
 def test_mean_waveform_of_many_pixels():

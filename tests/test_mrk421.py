@@ -101,7 +101,7 @@ def test_file_mode(subarray):
     # by index; the waveforms of the first 50 events are in the file
     session.go_to("#3")
     assert session.event_key(21) == keys[3]
-    session.set_selected_pixels([100])
+    session.set_selected_pixels([100], 21)
     for i, kind in ((1, "r0"), (2, "r1"), (3, "dl0")):
         page = session.pages[i]
         page.refresh()
@@ -109,7 +109,7 @@ def test_file_mode(subarray):
         assert page.views[21].waveforms.source.data["pixel"]
     # R0 of sst1mpipe: every field is readable, the fields of the same shape in a menu
     r0 = session.pages[1]
-    session.set_selected_pixels([10, 11])
+    session.set_selected_pixels([10, 11], 21)
     r0.refresh()
     assert {"pedestal", "pixel_flags"} <= set(r0.pixel_field.options)
     assert r0.waveform_field.options == ["waveform"]
@@ -123,15 +123,20 @@ def test_file_mode(subarray):
     assert len(view.trigger.traces.source.data["pixel"]) >= 1  # patches of the selected pixels
     assert "trigger_output_patch7" in r0.trace.options
     r0.trace.value = "trigger_output_patch7"
+    # one sample per telescope, common to the waveforms and the trigger traces
+    view.sample.value = 7
+    r0.refresh()
+    assert view.camera.figure.title.text == "waveform sample 7"
+    assert view.trigger.camera.figure.title.text == "trigger_output_patch7 sample 7"
     view.trigger.tapped(5, shift=False)
-    assert len(session.selected_pixels) == 3
+    assert len(session.selected_pixels(21)) == 3
     # the table has all the fields of the R0, and those of the trigger
     data = r0.fields.source.data
     names = set(data["name"])
     assert {"waveform", "pedestal", "pixel_flags", "trigger_input_traces", "_event_type"} <= names
     assert any(name.startswith("trigger.") for name in names)
     assert dict(zip(data["name"], data["tel_21"]))["waveform"] == "array (1, 1296, 50) int16"
-    session.set_selected_pixels([])
+    session.set_selected_pixels([], 21)
 
     # unknown event: nothing changes, an error is shown
     session.go_to("123")

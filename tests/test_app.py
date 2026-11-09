@@ -45,13 +45,25 @@ def test_all_pages_refresh(subarray):
 
 def test_selection_navigation_telescopes(subarray):
     store, session = make_session(subarray)
-    session.set_selected_pixels([3, 4])
+    session.set_selected_pixels([3, 4], 1)
     session.pages[2].refresh()
     assert session.pages[2].views[1].waveforms.source.data["pixel"] == ["3", "4"]
+    # each telescope has its own pixel selection
+    assert session.selected_pixels(2) == []
+    session.set_selected_pixels([5], 2)
+    assert session.selected_pixels(1) == [3, 4] and session.selected_pixels(2) == [5]
+    session.clear_selected_pixels()
+    assert session.selected_pixels(1) == [] and session.selected_pixels(2) == []
+    session.set_selected_pixels([3, 4], 1)
 
     # each telescope has its displayed event
     session.step(-1)
     assert not session.follow and session.event_key(1) == (1, 1) and session.event_key(2) == (1, 10)
+    # Prev / Next of one telescope: the other telescope keeps its event
+    session.step(+1, [1])
+    assert session.event_key(1) == (1, 2) and session.event_key(2) == (1, 10)
+    session.step(-1, [1])
+    assert session.event_key(1) == (1, 1)
     session.step(-5)
     assert session.event_key(1) == (1, 0)
     session.set_follow(True)
@@ -93,7 +105,7 @@ def test_tick_refreshes_only_on_change(subarray):
     session.tick()
     session.tick()
     assert len(calls) == 1
-    session.set_selected_pixels([1])
+    session.set_selected_pixels([1], 1)
     session.tick()
     assert len(calls) == 2
 
@@ -161,7 +173,7 @@ def test_pages_of_a_browser_share_their_state(subarray):
 
     store, browser = make_session(subarray)
     overview, r1 = browser.sessions[0], browser.sessions[2]
-    overview.set_selected_pixels([3, 4])
+    overview.set_selected_pixels([3, 4], 1)
     overview.step(-1)
     r1.tick()
     assert r1.page.views[1].waveforms.source.data["pixel"] == ["3", "4"]
