@@ -25,7 +25,10 @@ def waveform_2d(waveform, channel=0):
 
 
 class WaveformPanel:
-    """Waveforms of up to `MAX_PIXELS` pixels, with a marker of a sample (e.g. the displayed one)"""
+    """
+    Waveforms of up to `MAX_PIXELS` pixels (the mean waveform of more pixels), with a marker of a
+    sample (e.g. the displayed one)
+    """
 
     def __init__(self, title="Waveforms", y_label="", width=620, height=400):
         self.figure = figure(title=title, width=width, height=height, tools=TOOLS, toolbar_location="above")
@@ -48,11 +51,16 @@ class WaveformPanel:
 
     def set_waveforms(self, waveforms, pixels, sample=None):
         """
-        Show the waveforms ``(n_pixels, n_samples)`` of the ``pixels`` (the first `MAX_PIXELS`)
-        and a marker at ``sample`` (None to hide it).
+        Show the waveforms ``(n_pixels, n_samples)`` of the ``pixels`` (their mean if there are
+        more than `MAX_PIXELS`) and a marker at ``sample`` (None to hide it).
         """
         waveforms = np.asarray(waveforms, dtype=float)
-        pixels = [int(p) for p in pixels if 0 <= int(p) < len(waveforms)][:MAX_PIXELS]
+        pixels = [int(p) for p in pixels if 0 <= int(p) < len(waveforms)]
+        if len(pixels) > MAX_PIXELS:
+            # a group of pixels (e.g. a module or a sector): their mean waveform
+            self._set_mean(waveforms, pixels, sample)
+            return
+
         samples = np.arange(waveforms.shape[-1])
         colors = [Category10_10[i % MAX_PIXELS] for i in range(len(pixels))]
         self.source.data = dict(
@@ -67,6 +75,18 @@ class WaveformPanel:
             self.legend.items = [
                 LegendItem(label=f"pixel {p}", renderers=[self._renderer], index=i) for i, p in enumerate(pixels)
             ]
+        self.sample_marker.visible = sample is not None
+        if sample is not None:
+            self.sample_marker.location = sample
+
+    def _set_mean(self, waveforms, pixels, sample):
+        samples = np.arange(waveforms.shape[-1])
+        label = f"mean of {len(pixels)} pixels"
+        self.source.data = dict(xs=[samples], ys=[np.nanmean(waveforms[pixels], axis=0)], color=["black"],
+                                pixel=[label])
+        if self._legend_pixels != ("mean", len(pixels)):
+            self._legend_pixels = ("mean", len(pixels))
+            self.legend.items = [LegendItem(label=label, renderers=[self._renderer], index=0)]
         self.sample_marker.visible = sample is not None
         if sample is not None:
             self.sample_marker.location = sample

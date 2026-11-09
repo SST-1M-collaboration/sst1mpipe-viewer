@@ -56,7 +56,7 @@ class ViewerSession:
         self.tel_select = Select(title="Telescope", value=self._tel_label(self.tel_id),
                                  options=[self._tel_label(t) for t in tel_ids], width=110)
         self.tel_select.on_change("value", lambda attr, old, new: self.set_tel(self._tel_from_label(new)))
-        self.live = Toggle(label="Live", active=self.follow, button_type="success" if self.follow else "light",
+        self.live = Toggle(label="Live", active=self.follow, button_type="success" if self.follow else "default",
                            width=70)
         self.live.on_change("active", lambda attr, old, new: self._live_clicked(new))
         self.prev_button = Button(label="◀ Prev", width=75)
@@ -186,7 +186,7 @@ class ViewerSession:
         if self.live.active != self.follow:
             self.live.active = self.follow
         # green when following the last event
-        self.live.button_type = "success" if self.follow else "light"
+        self.live.button_type = "success" if self.follow else "default"
         if self.follow:
             self._event_key = None
         elif self._event_key is None:
@@ -267,7 +267,11 @@ class ViewerSession:
             mode = f"{event} ({'?' if position is None else position + 1} / {n_events})"
         if self._goto_error:
             mode += f" &nbsp;<span style='color: #c62828'>{self._goto_error}</span>"
-        pixels = ", ".join(str(p) for p in self.selected_pixels) or "none"
+        n_selected = len(self.selected_pixels)
+        if n_selected > 10:
+            pixels = f"{n_selected} pixels"
+        else:
+            pixels = ", ".join(str(p) for p in self.selected_pixels) or "none"
         return (
             f"<b>Source</b>: {source} &nbsp;|&nbsp; <b>TEL {self.tel_id}</b> &nbsp;|&nbsp; {mode}"
             f" &nbsp;|&nbsp; <b>selected pixels</b>: {pixels}"

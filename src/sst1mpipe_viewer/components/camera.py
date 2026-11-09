@@ -3,7 +3,7 @@
 import numpy as np
 from bokeh.events import Tap
 from bokeh.layouts import column, row
-from bokeh.models import Checkbox, ColorBar, ColumnDataSource, NumericInput, Select
+from bokeh.models import Checkbox, ColorBar, ColumnDataSource, HoverTool, NumericInput, Select
 from ctapipe.visualization.bokeh import CameraDisplay
 
 from .histogram import add_caption
@@ -34,10 +34,13 @@ class CameraPanel:
     on_pixel_click : callable or None
         Called with the list of the selected pixels when pixels are clicked
         (shift+click to select several pixels).
+    on_pixel_tap : callable or None
+        Called with the clicked pixel and whether shift was pressed, instead of the selection
+        of the clicked pixels (e.g. to select a group of pixels).
     """
 
     def __init__(self, geometry=None, title="", cmap="inferno", width=440, height=400, on_pixel_click=None,
-                 show_controls=True):
+                 show_controls=True, on_pixel_tap=None, show_colorbar=True, selected_color=SELECTED_COLOR):
         self.display = CameraDisplay(
             geometry=None, cmap=cmap, title=title, width=width, height=height, tools=TOOLS,
             use_notebook=False, toolbar_location="above",
@@ -47,6 +50,10 @@ class CameraPanel:
         self.figure.axis.visible = True
         self.figure.grid.visible = False
         self._on_pixel_click = on_pixel_click
+        self._on_pixel_tap = on_pixel_tap
+        self._show_colorbar = show_colorbar
+        self._selected_color = selected_color
+        self._hover_label = None
         self._mask = None
         self._selected = []
         self._geometry = None
@@ -63,7 +70,7 @@ class CameraPanel:
 
         # the clicked pixel is found from the position of the click: the bokeh selection would
         # fade the other pixels
-        if on_pixel_click is not None:
+        if on_pixel_click is not None or on_pixel_tap is not None:
             self.figure.on_event(Tap, self._tapped)
 
         self.cmap_select = Select(title="Colormap", value=cmap, options=list(CMAPS), width=95)
@@ -95,7 +102,7 @@ class CameraPanel:
         self.figure.renderers = [r for r in self.figure.renderers if r not in self._overlays] + self._overlays
         if self._color_bar is None:
             self._color_bar = ColorBar(color_mapper=self.display.norm, label_standoff=8, border_line_color=None,
-                                       width=12)
+                                       width=12, visible=self._show_colorbar)
             self.figure.add_layout(self._color_bar, "right")
         unit = geometry.pix_x.unit
         self.figure.xaxis.axis_label = f"x ({unit})" if geometry.frame is None else f"fov_lon ({unit})"
@@ -114,6 +121,17 @@ class CameraPanel:
     # ---------------------------------------------------------------- update
     def set_title(self, title):
         self.figure.title.text = title
+
+    def set_hover_column(self, label, values):
+        """Show ``values`` (one per pixel, e.g. the group of each pixel) in the tooltip of the pixels"""
+        if self._geometry is None:
+            return
+        source = self.display.datasource
+        source.data = {**source.data, "extra": np.asarray(values)}
+        if self._hover_label != label:
+            self._hover_label = label
+            for tool in self.figure.select(HoverTool):
+                tool.tooltips = [("pixel", "@id"), (label, "@extra")]
 
     def set_caption(self, text):
         """Text under the camera (e.g. the event or the number of entries)"""
@@ -188,7 +206,11 @@ class CameraPanel:
         pixel = self.pixel_at(event.x, event.y)
         if pixel is None:
             return
-        if event.modifiers and event.modifiers.get("shift"):
+        shift = bool(event.modifiers and event.modifiers.get("shift"))
+        if self._on_pixel_tap is not None:
+            self._on_pixel_tap(pixel, shift)
+            return
+        if shift:
             # shift+click adds or removes a pixel
             pixels = [p for p in self._selected if p != pixel]
             if len(pixels) == len(self._selected):
@@ -211,7 +233,7 @@ class CameraPanel:
         if self._selected:
             width[self._selected] = 3
             alpha[self._selected] = 1.0
-            color[self._selected] = SELECTED_COLOR
+            color[self._selected] = self._selected_color
         self.display.datasource.patch({
             "line_width": [(slice(None), width)],
             "line_alpha": [(slice(None), alpha)],

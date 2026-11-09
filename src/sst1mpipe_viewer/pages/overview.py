@@ -6,6 +6,7 @@ from bokeh.models import ColumnDataSource, DataTable, Div, TableColumn
 from ..components import ArrayPanel
 from ..store import KINDS
 from .base import Page, message_div
+from .pixel_selection import PixelSelectionPanel
 
 __all__ = ["OverviewPage"]
 
@@ -47,10 +48,12 @@ class OverviewPage(Page):
         self.summary = DataTable(source=self.summary_source, columns=columns, width=1100, height=110,
                                  index_position=None)
         self.array_container = column(self.message)
+        self.pixel_selection = PixelSelectionPanel(session)
         self.layout = column(
             row(Div(text=WELCOME, width=540), self.array_container),
             Div(text="<h3 style='margin: 8px 0 0 0'>Data received</h3>"),
             self.summary,
+            self.pixel_selection.layout,
         )
 
     def _build_array(self, subarray):
@@ -89,6 +92,7 @@ class OverviewPage(Page):
             self._build_array(self.store.subarray)
         rates = self.store.rates()
         self.summary_source.data = self._summary(self.store.counts(), rates)
+        self.pixel_selection.refresh()
         if self.array_panel is not None:
             self.array_panel.set_selected(self.session.tel_id)
             self.array_panel.set_active(sorted({tel for (tel, _), rate in rates.items() if rate > 0}))
