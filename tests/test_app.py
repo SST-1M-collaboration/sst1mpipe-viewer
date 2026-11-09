@@ -3,9 +3,8 @@
 import numpy as np
 from bokeh.document import Document
 from bokeh.events import Tap
-from conftest import dl1_row, r1_row
+from conftest import Browser, dl1_row, r1_row
 
-from sst1mpipe_viewer.app import ViewerSession
 from sst1mpipe_viewer.components import CameraPanel, Histogram1DPanel
 from sst1mpipe_viewer.pages.waveforms import sample_image
 from sst1mpipe_viewer.store import ViewerStore
@@ -17,12 +16,11 @@ def make_session(subarray):
         store.push_row("r1", r1_row(i))
         store.push_row("dl1", dl1_row(i))
     store.push_row("dl1", dl1_row(10, tel_id=2))
-    return store, ViewerSession(store, Document())
+    return store, Browser(store)
 
 
 def refresh_all(session):
-    for i, page in enumerate(session.pages):
-        session.tabs.active = i
+    for page in session.pages:
         page.refresh()
 
 
@@ -67,7 +65,7 @@ def test_selection_navigation_telescope(subarray):
 def test_without_subarray():
     store = ViewerStore()
     store.push_row("dl1", dl1_row(1))
-    session = ViewerSession(store, Document())
+    session = Browser(store)
     refresh_all(session)
     assert "geometry" in session.pages[4].message.text
 
@@ -123,20 +121,72 @@ def test_components(subarray):
     assert list(sample_image(waveforms, 10)) == [2, 5]  # the last sample
 
 
-def test_server_application(subarray):
-    """The bokeh application of the server creates a session in a document"""
+def test_server_pages(subarray):
+    """One page (bokeh application) per data level"""
     from sst1mpipe_viewer.server import make_server
 
     store = ViewerStore(subarray)
     server = make_server(store, port=0, refresh_period=2000)
     try:
-        application = server._tornado.applications["/"].application
-        doc = Document()
-        application.initialize_document(doc)
-        assert doc.title == "SST-1M Event Viewer"
-        assert len(doc.session_callbacks) == 1
+        assert set(server._tornado.applications) == {"/", "/r0", "/r1", "/dl0", "/dl1", "/statistics"}
+        for path, title in (("/", "Overview"), ("/r1", "R1"), ("/statistics", "DL1 Statistics")):
+            doc = Document()
+            server._tornado.applications[path].application.initialize_document(doc)
+            assert doc.title == f"SST-1M Event Viewer – {title}"
+            assert len(doc.session_callbacks) == 1
     finally:
         server.stop()
+
+
+def test_pages_of_a_browser_share_their_state(subarray):
+    """A change in a page (pixels, event, telescope) is followed by the other pages of the browser"""
+    from types import SimpleNamespace
+
+    from sst1mpipe_viewer.app import StateRegistry, ViewerSession, _client_id
+
+    store, browser = make_session(subarray)
+    overview, r1 = browser.sessions[0], browser.sessions[2]
+    overview.set_selected_pixels([3, 4])
+    overview.step(-1)
+    r1.tick()
+    assert r1.page.waveforms.source.data["pixel"] == ["3", "4"]
+    assert not r1.live.active and r1.live.button_type == "default"
+    overview.set_tel(2)
+    r1.tick()
+    assert r1.tel_select.value == "TEL 2"
+
+    # the pages of the same client id (in their URL) share a state, other clients have their own
+    registry = StateRegistry()
+
+    def doc_of(url_arguments):
+        return SimpleNamespace(session_context=SimpleNamespace(request=SimpleNamespace(arguments=url_arguments)))
+
+    assert _client_id(doc_of({"c": [b"abc"]})) == "abc"
+    assert _client_id(doc_of({})) is None
+    assert _client_id(doc_of({"c": [b"<script>"]})) is None  # only alphanumeric ids
+    assert _client_id(Document()) is None
+    assert registry.get("abc", store) is registry.get("abc", store)
+    assert registry.get("abc", store) is not registry.get("xyz", store)
+    session = ViewerSession(store, Document(), page="r0", state=registry.get("abc", store), client_id="abc")
+    assert "/r1?c=abc" in session.layout.children[1].text
+
+
+def test_same_camera_is_not_redrawn(subarray):
+    """Changing to a telescope with the same camera keeps the drawing of the pixels"""
+    from sst1mpipe_viewer.app import ViewerSession
+
+    store, _ = make_session(subarray)
+    session = ViewerSession(store, Document(), page="r1")
+    camera = session.page.camera
+    renderer = camera.display._patches
+    session.set_tel(2)
+    session.page.refresh()
+    assert camera.display._patches is renderer
+    # the selection and the cleaning mask are layers of their pixels only
+    camera.set_selected([1, 2])
+    assert len(camera._selected_source.data["xs"]) == 2
+    camera.set_mask(np.arange(camera.n_pixels) < 5)
+    assert len(camera._mask_source.data["xs"]) == 5
 
 
 def test_file_loaded_after_the_session(subarray):
@@ -144,7 +194,7 @@ def test_file_loaded_after_the_session(subarray):
     from astropy.table import Table
 
     store = ViewerStore(subarray)
-    session = ViewerSession(store, Document())
+    session = Browser(store)
     assert session.follow
     store.push_table("dl1", Table(rows=[dl1_row(i) for i in range(5)]))
     session.tick()
@@ -159,7 +209,7 @@ def test_file_loaded_after_the_session(subarray):
 def test_stream_keeps_following(subarray):
     """Events pushed one by one: the session follows the last one"""
     store = ViewerStore(subarray)
-    session = ViewerSession(store, Document())
+    session = Browser(store)
     store.push_row("dl1", dl1_row(1))
     session.tick()
     assert session.follow and session.event_key("dl1") == (1, 1)

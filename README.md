@@ -7,6 +7,11 @@ their DL1 parameters, based on [ctapipe](https://github.com/cta-observatory/ctap
 
 ## Pages
 
+One web page per data level, at `http://<host>:5006/` + `/` (Overview), `/r0`, `/r1`, `/dl0`,
+`/dl1` (DL1 Event), `/statistics` (DL1 Statistics), linked by the navigation bar at the top. The
+pages opened by a browser share the selected telescope, the displayed event and the selected
+pixels (the client id `?c=...` of the links): going from a page to another keeps the context.
+
 | Page | Content |
 |---|---|
 | **Overview** | Telescopes on an OpenStreetMap map at their Earth location (or in the ground frame), data received per telescope and data level; **pixel selection by group** of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
@@ -53,6 +58,10 @@ replays the events of the file one after the other at 1 kHz, as a live stream: t
 follow the last event and the statistics are accumulated. A file read by a ctapipe
 `EventSource` (e.g. `run.simtel.gz`) is processed event by event (calibration and DL1 parameters
 with the default ctapipe configuration).
+
+The subarray (camera geometries, positions and Earth location of the telescopes) is read from
+`--subarray FILE.h5`, by default the SST-1M subarray of sst1mpipe (`sst1m_array.h5`); the
+telescopes of the files which are not in it are added.
 
 The viewer is at http://localhost:5006/ (`--port`, `--allow-websocket-origin host:port` to reach
 it from another machine). `sst1mpipe-viewer --help` lists the options (subarray, statistics

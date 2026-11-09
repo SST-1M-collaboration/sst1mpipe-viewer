@@ -66,7 +66,16 @@ class CameraPanel:
         )
         cog = self.figure.scatter(x="x", y="y", source=self._ellipse_source, marker="cross", size=12,
                                   line_color=SELECTED_COLOR, line_width=2)
-        self._overlays = [ellipse, cog]
+        # outlines of the pixels of the mask (e.g. the cleaning) and of the selected pixels: layers
+        # with only these pixels (cheaper than changing the line of all the pixels)
+        self._xs, self._ys = [], []
+        self._mask_source = ColumnDataSource(data=dict(xs=[], ys=[]))
+        mask = self.figure.patches(xs="xs", ys="ys", source=self._mask_source, fill_color=None,
+                                   line_color=MASK_COLOR, line_width=1.5, line_alpha=0.9)
+        self._selected_source = ColumnDataSource(data=dict(xs=[], ys=[]))
+        selected = self.figure.patches(xs="xs", ys="ys", source=self._selected_source, fill_color=None,
+                                       line_color=selected_color, line_width=3)
+        self._overlays = [mask, selected, ellipse, cog]
 
         # the clicked pixel is found from the position of the click: the bokeh selection would
         # fade the other pixels
@@ -92,12 +101,32 @@ class CameraPanel:
             self.set_geometry(geometry)
 
     # ----------------------------------------------------------------- setup
+    def _same_camera(self, geometry):
+        current = self._geometry
+        return (
+            current is not None and geometry.n_pixels == current.n_pixels and geometry.pix_type == current.pix_type
+            and geometry.pix_x.unit == current.pix_x.unit
+            and np.allclose(geometry.pix_x.value, current.pix_x.value)
+            and np.allclose(geometry.pix_y.value, current.pix_y.value)
+        )
+
     def set_geometry(self, geometry):
-        """Set the camera geometry (nothing is done if it is the current one)"""
+        """
+        Set the camera geometry. Nothing is sent to the browser if it is the current one, or a
+        camera of the same type (same pixels, e.g. another SST-1M telescope)
+        """
         if geometry is self._geometry:
+            return
+        if self._same_camera(geometry):
+            self._geometry = geometry
             return
         self._geometry = geometry
         self.display.geometry = geometry
+        data = self.display.datasource.data
+        if geometry.pix_type.name in ("HEXAGON", "SQUARE"):
+            self._xs, self._ys = data["xs"], data["ys"]
+        else:  # circles: no outline layers
+            self._xs, self._ys = [], []
         # the overlays are drawn over the pixels
         self.figure.renderers = [r for r in self.figure.renderers if r not in self._overlays] + self._overlays
         if self._color_bar is None:
@@ -108,6 +137,7 @@ class CameraPanel:
         self.figure.xaxis.axis_label = f"x ({unit})" if geometry.frame is None else f"fov_lon ({unit})"
         self.figure.yaxis.axis_label = f"y ({unit})" if geometry.frame is None else f"fov_lat ({unit})"
         self._mask = None
+        self._selected = []
         self._update_outline()
 
     @property
@@ -163,7 +193,7 @@ class CameraPanel:
         ):
             return
         self._mask = mask
-        self._update_outline()
+        self._update_mask()
 
     def set_selected(self, pixels):
         """Outline the selected pixels (without calling ``on_pixel_click``)"""
@@ -171,7 +201,7 @@ class CameraPanel:
         if pixels == self._selected:
             return
         self._selected = pixels
-        self._update_outline()
+        self._update_selected()
 
     def set_ellipse(self, hillas):
         """
@@ -220,25 +250,21 @@ class CameraPanel:
         self.set_selected(pixels)
         self._on_pixel_click(pixels)
 
+    def _outlines(self, pixels):
+        pixels = [p for p in pixels if p < len(self._xs)]
+        return dict(xs=[self._xs[p] for p in pixels], ys=[self._ys[p] for p in pixels])
+
+    def _update_mask(self):
+        mask = self._mask
+        pixels = [] if mask is None or mask.shape != (self.n_pixels,) else np.flatnonzero(mask).tolist()
+        self._mask_source.data = self._outlines(pixels)
+
+    def _update_selected(self):
+        self._selected_source.data = self._outlines(self._selected)
+
     def _update_outline(self):
-        n = self.n_pixels
-        if n == 0:
-            return
-        width = np.zeros(n)
-        alpha = np.zeros(n)
-        color = np.full(n, MASK_COLOR, dtype=object)
-        if self._mask is not None and self._mask.shape == (n,):
-            width[self._mask] = 1.5
-            alpha[self._mask] = 0.9
-        if self._selected:
-            width[self._selected] = 3
-            alpha[self._selected] = 1.0
-            color[self._selected] = self._selected_color
-        self.display.datasource.patch({
-            "line_width": [(slice(None), width)],
-            "line_alpha": [(slice(None), alpha)],
-            "line_color": [(slice(None), list(color))],
-        })
+        self._update_mask()
+        self._update_selected()
 
     def _finite_values(self):
         values = np.asarray(self.display.datasource.data["values"], dtype=float)

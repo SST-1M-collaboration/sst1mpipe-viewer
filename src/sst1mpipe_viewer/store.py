@@ -30,7 +30,9 @@ import threading
 import time
 from collections import Counter, OrderedDict, deque
 
+import astropy.units as u
 import numpy as np
+from ctapipe.coordinates import GroundFrame
 from ctapipe.instrument import SubarrayDescription
 
 from .accumulators import CameraAccumulator, Cut
@@ -180,7 +182,8 @@ class ViewerStore:
     def add_telescopes(self, subarray):
         """
         Add the telescopes of ``subarray`` not yet in the subarray of the store (e.g. the files
-        of sst1mpipe have one telescope each), or set it if the store has none
+        of sst1mpipe have one telescope each), or set it if the store has none. The positions of
+        the added telescopes are taken relative to the reference location of the store's subarray.
         """
         with self._lock:
             current = self.subarray
@@ -190,9 +193,14 @@ class ViewerStore:
             new = [tel_id for tel_id in subarray.tel_ids if tel_id not in current.tel]
             if not new:
                 return
+            earth = subarray.tel_earth_locations
+            positions = {}
+            for t in new:
+                ground = GroundFrame.from_earth_location(earth[t], current.reference_location)
+                positions[t] = u.Quantity([ground.x, ground.y, ground.z]).to(u.m)
             merged = SubarrayDescription(
                 name=current.name,
-                tel_positions={**current.positions, **{t: subarray.positions[t] for t in new}},
+                tel_positions={**current.positions, **positions},
                 tel_descriptions={**current.tel, **{t: subarray.tel[t] for t in new}},
                 reference_location=current.reference_location,
             )

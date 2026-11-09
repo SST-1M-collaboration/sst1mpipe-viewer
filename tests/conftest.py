@@ -68,3 +68,22 @@ def r1_row(event_id, tel_id=1, obs_id=1):
 @pytest.fixture(scope="session")
 def subarray():
     return make_subarray()
+
+
+class Browser:
+    """
+    The pages of the viewer opened by a browser (one document each, sharing a UserState), in the
+    order of the navigation; the other attributes are those of the first page (state, header)
+    """
+
+    def __init__(self, store):
+        from bokeh.document import Document
+
+        from sst1mpipe_viewer.app import PAGES, UserState, ViewerSession
+
+        self.state = UserState(store)
+        self.sessions = [ViewerSession(store, Document(), page=name, state=self.state) for name in PAGES]
+        self.pages = [session.page for session in self.sessions]
+
+    def __getattr__(self, name):
+        return getattr(self.sessions[0], name)

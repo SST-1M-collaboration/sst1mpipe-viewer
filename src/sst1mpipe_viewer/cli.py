@@ -41,8 +41,9 @@ def parse_args(argv=None):
                         " processed at once, or files read by a ctapipe EventSource (e.g. simtel), processed"
                         " event by event")
     parser.add_argument("--subarray", type=Path, default=None,
-                        help="HDF5 file of the subarray description (default: the one of the first file,"
-                        " or sst1mpipe's)")
+                        help="HDF5 file of the subarray description: camera geometries, positions of the"
+                        " telescopes (default: the SST-1M subarray of sst1mpipe, sst1m_array.h5); the"
+                        " telescopes of the files not in it are added")
     parser.add_argument("--statistics-config", type=Path, default=None,
                         help="YAML configuration of the accumulated statistics")
     parser.add_argument("--replay-rate", type=float, default=0.0, metavar="HZ",
@@ -61,11 +62,13 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
 
-    # without --subarray, the subarray of the first file is used (set by its feed)
-    subarray_file = args.subarray or (None if args.files else default_subarray_file())
+    subarray_file = args.subarray or default_subarray_file()
     subarray = SubarrayDescription.from_hdf(subarray_file) if subarray_file else None
-    if subarray is None and not args.files:
-        log.warning("No subarray description: the cameras and the array cannot be displayed")
+    if subarray is None:
+        log.warning("No subarray description (sst1mpipe not installed and no --subarray): the subarray of"
+                    " the files is used")
+    else:
+        log.info("Subarray %s (%s)", subarray.name, subarray_file)
 
     store = ViewerStore(subarray=subarray, statistics_config=load_statistics_config(args.statistics_config))
     if args.files:

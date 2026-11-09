@@ -7,12 +7,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from bokeh.document import Document
+from conftest import Browser
 from ctapipe.coordinates import TelescopeFrame
 from ctapipe.image import hillas_parameters
 from ctapipe.instrument import SubarrayDescription
 
-from sst1mpipe_viewer.app import ViewerSession
 from sst1mpipe_viewer.feeds import HDF5Feed, read_tables
 from sst1mpipe_viewer.store import ViewerStore
 
@@ -81,7 +80,7 @@ def test_file_mode(subarray):
     keys = store.event_keys(21)
     assert len(keys) == 1000
 
-    session = ViewerSession(store, Document())
+    session = Browser(store)
     assert session.tel_id == 21 and not session.follow
     assert session.event_key() == keys[0]
     session.step(+1)
@@ -94,7 +93,6 @@ def test_file_mode(subarray):
     session.go_to(str(cleaned[0][1]))
     assert session.event_key() == cleaned[0]
     dl1_page = session.pages[4]
-    session.tabs.active = 4
     dl1_page.refresh()
     assert not dl1_page.message.visible
     assert dl1_page.image._ellipse_source.data["x"]
@@ -105,13 +103,11 @@ def test_file_mode(subarray):
     session.set_selected_pixels([100])
     for i, kind in ((1, "r0"), (2, "r1"), (3, "dl0")):
         page = session.pages[i]
-        session.tabs.active = i
         page.refresh()
         assert not page.message.visible, kind
         assert page.waveforms.source.data["pixel"]
     # R0 of sst1mpipe: every field is readable
     r0 = session.pages[1]
-    session.tabs.active = 1
     session.set_selected_pixels([10, 11])
     r0.refresh()
     assert list(r0.field_cameras) == ["pixel_flags"]  # one camera per pixel field (pedestal: its own)

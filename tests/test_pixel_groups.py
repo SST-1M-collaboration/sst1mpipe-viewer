@@ -4,11 +4,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from bokeh.document import Document
+from conftest import Browser
 from ctapipe.instrument import SubarrayDescription
 from scipy.sparse.csgraph import connected_components
 
-from sst1mpipe_viewer.app import ViewerSession
 from sst1mpipe_viewer.components import WaveformPanel
 from sst1mpipe_viewer.pixel_groups import GROUPINGS, parse_ids, pixel_groups
 from sst1mpipe_viewer.store import ViewerStore
@@ -59,7 +58,7 @@ def test_groups_are_contiguous_in_the_camera_of_the_data(digicam, column):
 @needs_file
 def test_selection_by_group(digicam):
     store = ViewerStore(digicam)
-    session = ViewerSession(store, Document())
+    session = Browser(store)
     panel = session.pages[0].pixel_selection
     session.pages[0].refresh()
     assert panel.camera.layout.visible
@@ -94,7 +93,7 @@ def test_selection_by_group(digicam):
 
 def test_not_digicam(subarray):
     """Other cameras: the group selection is not available"""
-    session = ViewerSession(ViewerStore(subarray), Document())
+    session = Browser(ViewerStore(subarray))
     session.pages[0].refresh()
     panel = session.pages[0].pixel_selection
     assert not panel.camera.layout.visible and "not available" in panel.message.text
@@ -122,7 +121,7 @@ def test_array_on_a_map(digicam):
     x, y = web_mercator([0.0, 180.0], [0.0, 0.0])
     assert np.allclose(x, [0, 20037508.34], atol=1) and np.allclose(y, 0)
 
-    session = ViewerSession(ViewerStore(digicam), Document())
+    session = Browser(ViewerStore(digicam))
     overview = session.pages[0]
     overview.refresh()
     assert list(overview.array_panels) == ["Map (OpenStreetMap)", "Ground frame"]
