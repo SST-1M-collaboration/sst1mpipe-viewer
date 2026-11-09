@@ -27,10 +27,24 @@ def test_quantities_times_and_enums_are_converted():
         "dimensionless": 2 * u.one, "missing": None,
     })
     assert np.isclose(columns["length"][0], 1 / 60)
-    assert np.isclose(columns["time"][0], 10.0)
+    # a single time is kept as a Time (converted only to be shown)
+    assert isinstance(columns["time"][0], Time) and np.isclose(columns["time"][0].unix, 10.0)
     assert columns["event_type"][0] == EventType.SUBARRAY.value
     assert columns["dimensionless"][0] == 2
     assert "missing" not in columns
+
+
+def test_time_column_of_a_table():
+    table = Table({"obs_id": [1, 1], "event_id": [1, 2], "time": Time([10.0, 20.0], format="unix")})
+    assert np.allclose(to_columns(table)["time"], [10.0, 20.0])
+
+
+def test_event_time_is_shown():
+    from sst1mpipe_viewer.pages.base import event_description
+
+    time = Time("2026-01-21T03:06:20", scale="utc")
+    assert "2026-01-21T03:06:20" in event_description((1, 2), {"trigger": {"time": time}})
+    assert "2026-01-21T03:06:20" in event_description((1, 2), {"trigger": {"time": time.unix}})
 
 
 def test_table_rows():

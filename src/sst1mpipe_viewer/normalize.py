@@ -10,7 +10,8 @@ fields of its sub-containers take the prefix of the sub-container, e.g. a
 ``/dl1/event/telescope/parameters``.
 
 Quantities are converted to the canonical units of `CANONICAL_UNITS` (the units of the
-ctapipe tables) when they are compatible, times to unix seconds.
+ctapipe tables) when they are compatible, the time columns of tables to unix seconds (a single
+time, e.g. of a container, is kept as an astropy ``Time``: its conversion is slow).
 """
 
 from collections.abc import Mapping
@@ -36,15 +37,35 @@ CANONICAL_UNITS = {
 }
 
 
+#: types converted directly by numpy (the most frequent values: fast path)
+_PLAIN_TYPES = (float, int, bool, np.floating, np.integer, np.bool_)
+#: unit -> canonical unit (or None), cached: looking up the physical type of a unit is slow
+_UNIT_CACHE = {}
+
+
+def _canonical_unit(unit):
+    try:
+        return _UNIT_CACHE[unit]
+    except KeyError:
+        result = _UNIT_CACHE[unit] = CANONICAL_UNITS.get(str(unit.physical_type))
+        return result
+
+
 def _to_value(value):
     """Plain value (numpy array or scalar) of a quantity, time or value"""
-    if isinstance(value, Time):
-        return np.asanyarray(value.unix)
+    if isinstance(value, _PLAIN_TYPES) or type(value) is np.ndarray:
+        return np.asarray(value)
     if isinstance(value, u.Quantity):
-        unit = CANONICAL_UNITS.get(str(value.unit.physical_type))
-        if unit is not None:
-            return np.asanyarray(value.to_value(unit))
-        return np.asanyarray(value.value)
+        unit = _canonical_unit(value.unit)
+        return np.asarray(value.to_value(unit) if unit is not None and unit != value.unit else value.value)
+    if isinstance(value, Time):
+        if value.isscalar:
+            # converting a time is slow (scale conversion): a single time is kept as it is (a 0-d
+            # object array) and converted only to be shown
+            wrapped = np.empty((), dtype=object)
+            wrapped[()] = value
+            return wrapped
+        return np.asanyarray(value.unix)
     if isinstance(value, Enum):  # e.g. EventType
         return np.asanyarray(value.value)
     return np.asanyarray(value)

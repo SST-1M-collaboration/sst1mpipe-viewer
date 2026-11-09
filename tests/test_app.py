@@ -133,3 +133,29 @@ def test_server_application(subarray):
         assert len(doc.session_callbacks) == 1
     finally:
         server.stop()
+
+
+def test_file_loaded_after_the_session(subarray):
+    """A session opened before a file is loaded goes to its first event"""
+    from astropy.table import Table
+
+    store = ViewerStore(subarray)
+    session = ViewerSession(store, Document())
+    assert session.follow
+    store.push_table("dl1", Table(rows=[dl1_row(i) for i in range(5)]))
+    session.tick()
+    assert not session.follow and session.event_key() == (1, 0)
+    session.go_to("#-1")
+    assert session.event_key() == (1, 4)
+    session.go_to("not a number")
+    session.tick()
+    assert session.event_key() == (1, 4) and "no event" in session.status.text
+
+
+def test_stream_keeps_following(subarray):
+    """Events pushed one by one: the session follows the last one"""
+    store = ViewerStore(subarray)
+    session = ViewerSession(store, Document())
+    store.push_row("dl1", dl1_row(1))
+    session.tick()
+    assert session.follow and session.event_key("dl1") == (1, 1)

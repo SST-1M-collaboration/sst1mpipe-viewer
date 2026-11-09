@@ -3,12 +3,13 @@
 import argparse
 import importlib.util
 import logging
+import threading
 from pathlib import Path
 
 from ctapipe.instrument import SubarrayDescription
 
 from .config import load_statistics_config
-from .demo import make_feed
+from .feeds import make_feed
 from .server import serve
 from .store import ViewerStore
 
@@ -35,16 +36,19 @@ def parse_args(argv=None):
     parser.add_argument("--address", default=None, help="address of the server (default: all interfaces)")
     parser.add_argument("--allow-websocket-origin", action="append", default=None, metavar="HOST[:PORT]",
                         help="allowed websocket origin, e.g. calculus:5006 (repeatable)")
+    parser.add_argument("files", nargs="*", type=Path, metavar="FILE",
+                        help="files to show: ctapipe HDF5 files (e.g. of sst1mpipe-process), all their events"
+                        " processed at once, or files read by a ctapipe EventSource (e.g. simtel), processed"
+                        " event by event")
     parser.add_argument("--subarray", type=Path, default=None,
-                        help="HDF5 file of the subarray description (default: the demo file's, or sst1mpipe's)")
+                        help="HDF5 file of the subarray description (default: the one of the first file,"
+                        " or sst1mpipe's)")
     parser.add_argument("--statistics-config", type=Path, default=None,
                         help="YAML configuration of the accumulated statistics")
-    parser.add_argument("--demo", type=Path, default=None, metavar="FILE",
-                        help="replay the events of a ctapipe HDF5 file (DL1 with images, optionally R1/DL0),"
-                        " or process a file read by a ctapipe EventSource (e.g. simtel)")
-    parser.add_argument("--rate", type=float, default=5.0,
-                        help="events per second of the demo, 0 for the whole file at once (default: %(default)s)")
-    parser.add_argument("--no-loop", action="store_true", help="replay the demo file only once")
+    parser.add_argument("--replay-rate", type=float, default=0.0, metavar="HZ",
+                        help="push the events of the files one after the other at this rate (events per second),"
+                        " as a live stream, instead of all at once")
+    parser.add_argument("--loop", action="store_true", help="with --replay-rate, replay the files endlessly")
     parser.add_argument("--refresh-period", type=int, default=1000,
                         help="period of the refresh of the displays in ms (default: %(default)s)")
     parser.add_argument("--statistics-period", type=float, default=2.0,
@@ -57,19 +61,37 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
 
-    # without --subarray, the subarray of the demo file is used (set by the feed)
-    subarray_file = args.subarray or (None if args.demo else default_subarray_file())
+    # without --subarray, the subarray of the first file is used (set by its feed)
+    subarray_file = args.subarray or (None if args.files else default_subarray_file())
     subarray = SubarrayDescription.from_hdf(subarray_file) if subarray_file else None
-    if subarray is None and args.demo is None:
+    if subarray is None and not args.files:
         log.warning("No subarray description: the cameras and the array cannot be displayed")
 
     store = ViewerStore(subarray=subarray, statistics_config=load_statistics_config(args.statistics_config))
-    if args.demo is not None:
-        make_feed(args.demo, store, rate=args.rate, loop=not args.no_loop).start()
+    if args.files:
+        feeds = [make_feed(path, store, rate=args.replay_rate) for path in args.files]
+        store.source_description = ", ".join(str(path) for path in args.files) + (
+            f" (replay at {args.replay_rate:g} Hz)" if args.replay_rate > 0 else "")
+        # the files are read one after the other, in the background: the server starts at once
+        thread = threading.Thread(target=run_feeds, args=(feeds, args.loop and args.replay_rate > 0),
+                                  name="sst1mpipe-viewer-files", daemon=True)
+        thread.start()
 
     log.info("SST-1M viewer at http://%s:%d/", args.address or "localhost", args.port)
     serve(store, port=args.port, address=args.address, allow_websocket_origin=args.allow_websocket_origin,
           show=args.show, refresh_period=args.refresh_period, statistics_period=args.statistics_period)
+
+
+def run_feeds(feeds, loop=False):
+    """Run the feeds one after the other, endlessly with ``loop`` (the files replayed one after the other)"""
+    while True:
+        for feed in feeds:
+            try:
+                feed.run()
+            except Exception:
+                log.exception("Cannot read %s", feed.path)
+        if not loop:
+            return
 
 
 if __name__ == "__main__":

@@ -30,11 +30,14 @@ def event_type_name(value):
         return str(value)
 
 
-def format_time(unix):
+def format_time(value):
+    """ISO UTC time of an astropy Time or of unix seconds"""
     try:
-        return Time(float(unix), format="unix", scale="utc").isot
+        if isinstance(value, Time):
+            return value.utc.isot
+        return Time(float(value), format="unix", scale="utc").isot
     except (ValueError, TypeError):
-        return str(unix)
+        return str(value)
 
 
 def event_description(key, rows):

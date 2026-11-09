@@ -17,7 +17,9 @@ The viewer shows the last events received for the telescope chosen at the top of
 from the DL1 parameters (<b>DL1 Statistics</b> page).
 </p>
 <ul style="margin: 0; padding-left: 18px; max-width: 520px">
-<li><b>Live</b> follows the last event; <b>&#9664; Prev</b> / <b>Next &#9654;</b> browse the last events received.</li>
+<li><b>Live</b> follows the last event received; <b>&#9664; Prev</b> / <b>Next &#9654;</b> browse the
+events; <b>Event id</b> shows an event (an event_id, or <i>#index</i>: #0 the first event, #-1 the last).</li>
+<li>A file is processed at once: its first event is shown and the statistics are those of all its events.</li>
 <li>Click on a camera pixel to show its waveform (shift+click to select several pixels);
 the selection is shared by all the pages.</li>
 <li>Click on a telescope of the array to select it.</li>

@@ -7,7 +7,7 @@ from importlib.resources import files
 
 import numpy as np
 from bokeh.layouts import column, row
-from bokeh.models import Button, Div, Select, TabPanel, Tabs, Toggle
+from bokeh.models import Button, Div, Select, TabPanel, Tabs, TextInput, Toggle
 from ctapipe.coordinates import TelescopeFrame
 
 from .pages import DL1EventPage, DL1StatisticsPage, OverviewPage, WaveformPage
@@ -40,23 +40,31 @@ class ViewerSession:
         self.doc = doc
         tel_ids = store.tel_ids
         self.tel_id = tel_ids[0] if tel_ids else None
-        self.follow = True
-        self._event_key = None
+        # data pushed event by event (a stream): follow the last event; tables only (a file):
+        # show its first event
+        self.follow = store.has_event_data or not store.event_keys(self.tel_id)
+        self._event_key = None if self.follow else store.event_keys(self.tel_id)[0]
+        # without data yet: go to the first event if the data come as tables (a file being loaded)
+        self._auto_browse = self.follow and not store.has_event_data
         self.selected_pixels = []
         self._geometries = {}
         self._versions = {}  # page -> version of the store at its last refresh
         self._refresh_times = {}  # page -> time of its last refresh
         self._dirty = True
+        self._goto_error = None
 
         self.tel_select = Select(title="Telescope", value=self._tel_label(self.tel_id),
                                  options=[self._tel_label(t) for t in tel_ids], width=110)
         self.tel_select.on_change("value", lambda attr, old, new: self.set_tel(self._tel_from_label(new)))
-        self.live = Toggle(label="Live", active=True, button_type="success", width=70)
-        self.live.on_change("active", lambda attr, old, new: self.set_follow(new))
+        self.live = Toggle(label="Live", active=self.follow, button_type="success" if self.follow else "light",
+                           width=70)
+        self.live.on_change("active", lambda attr, old, new: self._live_clicked(new))
         self.prev_button = Button(label="◀ Prev", width=75)
         self.next_button = Button(label="Next ▶", width=75)
         self.prev_button.on_click(lambda: self.step(-1))
         self.next_button.on_click(lambda: self.step(+1))
+        self.event_input = TextInput(title="Event id", value="", width=130, placeholder="event_id or #index")
+        self.event_input.on_change("value", lambda attr, old, new: self.go_to(new))
         self.clear_pixels = Button(label="Clear pixel selection", width=150)
         self.clear_pixels.on_click(lambda: self.set_selected_pixels([]))
         self.status = Div(text="", styles={"font-size": "10pt", "color": "#444"}, width=1400, height=36)
@@ -83,8 +91,8 @@ class ViewerSession:
             ),
             width=1400, height=80,
         )
-        navigation = row(self.tel_select, column(Div(text=""), row(self.live, self.prev_button, self.next_button,
-                                                                   self.clear_pixels)))
+        navigation = row(self.tel_select, column(Div(text=""), row(self.live, self.prev_button, self.next_button)),
+                         self.event_input, column(Div(text=""), self.clear_pixels))
         self.layout = column(banner, navigation, self.status, self.tabs)
 
         if doc is not None:
@@ -106,7 +114,9 @@ class ViewerSession:
         if tel_id == self.tel_id:
             return
         self.tel_id = tel_id
-        self._event_key = None
+        self._goto_error = None
+        keys = self.store.event_keys(tel_id) if tel_id is not None else []
+        self._event_key = None if self.follow or not keys else keys[0]
         self.selected_pixels = []
         label = self._tel_label(tel_id)
         if label not in self.tel_select.options:
@@ -126,23 +136,57 @@ class ViewerSession:
         return self._geometries[key]
 
     # ---------------------------------------------------------------- event
-    def event_key(self, kind=None, predicate=None):
+    def event_key(self, kind=None, finite_column=None):
         """
-        Key of the displayed event: if following, the last one with data of ``kind``
-        (satisfying ``predicate(row)`` if given), else the chosen one.
+        Key of the displayed event: if following, the last one with data of ``kind`` (with a
+        finite ``finite_column`` if given, e.g. the events surviving the cleaning), else the
+        chosen one.
         """
         if self.tel_id is None:
             return None
         if not self.follow:
             return self._event_key
-        if predicate is not None:
-            return self.store.find_latest_key(self.tel_id, kind, predicate)
+        if finite_column is not None:
+            return self.store.find_latest_key(self.tel_id, kind, finite_column)
         return self.store.latest_key(self.tel_id, kind)
 
+    def go_to(self, value):
+        """
+        Show the event ``value`` of the telescope: an event_id, or ``#index`` for the index of
+        the event (from 0) in the events of the telescope. Unknown values are ignored.
+        """
+        value = value.strip()
+        if not value or self.tel_id is None:
+            return
+        keys = self.store.event_keys(self.tel_id)
+        key = None
+        try:
+            if value.startswith("#"):
+                index = int(value[1:])
+                key = keys[index] if -len(keys) <= index < len(keys) else None
+            else:
+                event_id = int(value)
+                key = next((k for k in keys if k[1] == event_id), None)
+        except ValueError:
+            key = None
+        if key is not None:
+            self._event_key = key
+            self.set_follow(False)
+        else:
+            self._goto_error = f"no event {value} for TEL {self.tel_id}"
+            self.request_refresh()
+
+    def _live_clicked(self, active):
+        self._auto_browse = False
+        self.set_follow(active)
+
     def set_follow(self, follow):
+        self._goto_error = None
         self.follow = bool(follow)
         if self.live.active != self.follow:
             self.live.active = self.follow
+        # green when following the last event
+        self.live.button_type = "success" if self.follow else "light"
         if self.follow:
             self._event_key = None
         elif self._event_key is None:
@@ -186,6 +230,15 @@ class ViewerSession:
             self.tel_select.options = options
         if self.tel_id is None and tel_ids:
             self.set_tel(tel_ids[0])
+        if self._auto_browse and self.tel_id is not None:
+            if self.store.has_event_data:
+                self._auto_browse = False
+            else:
+                keys = self.store.event_keys(self.tel_id)
+                if keys:
+                    self._auto_browse = False
+                    self._event_key = keys[0]
+                    self.set_follow(False)
         status = self._status_text()
         if status != self.status.text:
             self.status.text = status
@@ -206,7 +259,14 @@ class ViewerSession:
         # changes only with the actions of the user: changing a Div lays out the whole page again
         # (slow), the rates are in the table of the Overview page
         source = self.store.source_description or "no source"
-        mode = "following the last event" if self.follow else "browsing (press Live to follow the last event)"
+        if self.follow:
+            mode = "following the last event"
+        else:
+            position, n_events = self.store.event_position(self.tel_id, self._event_key)
+            event = f"event_id {self._event_key[1]}" if self._event_key else "no event"
+            mode = f"{event} ({'?' if position is None else position + 1} / {n_events})"
+        if self._goto_error:
+            mode += f" &nbsp;<span style='color: #c62828'>{self._goto_error}</span>"
         pixels = ", ".join(str(p) for p in self.selected_pixels) or "none"
         return (
             f"<b>Source</b>: {source} &nbsp;|&nbsp; <b>TEL {self.tel_id}</b> &nbsp;|&nbsp; {mode}"

@@ -1,12 +1,17 @@
 """
-Demonstration feed: replay the events of a ctapipe HDF5 file (written by ``ctapipe-process``
-or ``sst1mpipe-process``) into a `ViewerStore`, as rows (one event after the other at a given
-rate, to simulate a live stream) or as whole tables.
+Feeds of a `ViewerStore` from files, in a background thread:
 
-This is not the interface between the pipeline and the viewer, only a way to show data.
+- `HDF5Feed`: a ctapipe HDF5 file (written by ``ctapipe-process`` or ``sst1mpipe-process``),
+  pushed as whole tables (all the events processed at once and browsable), or replayed event by
+  event at a given rate to simulate a live stream;
+- `EventSourceFeed`: a file read by a ctapipe ``EventSource`` (e.g. simtel), processed and pushed
+  event by event.
+
+They are not the interface between the pipeline (e.g. its ZMQ stream) and the viewer.
 """
 
 import threading
+import time
 
 import tables
 from astropy.table import join
@@ -15,12 +20,13 @@ from ctapipe.io import read_table
 
 from .normalize import iter_rows, to_columns
 
-__all__ = ["read_tables", "DemoFeed", "EventSourceFeed", "make_feed"]
+__all__ = ["read_tables", "HDF5Feed", "EventSourceFeed", "make_feed"]
 
 KEYS = ["obs_id", "event_id", "tel_id"]
 
 
 TELESCOPE_TABLES = (
+    "/r0/event/telescope/tel_",
     "/r1/event/telescope/tel_",
     "/dl0/event/telescope/tel_",
     "/dl1/event/telescope/images/tel_",
@@ -30,7 +36,7 @@ TELESCOPE_TABLES = (
 
 def read_tables(path, tel_ids=None):
     """
-    Tables ``{(kind, tel_id): table}`` of the R1, DL0 and DL1 data and of the telescope
+    Tables ``{(kind, tel_id): table}`` of the R0, R1, DL0 and DL1 data and of the telescope
     triggers of a ctapipe HDF5 file (the DL1 images and parameters of an event are joined).
     """
     with tables.open_file(path) as h5file:
@@ -41,7 +47,7 @@ def read_tables(path, tel_ids=None):
 
     result = {}
     for tel_id in sorted(file_tel_ids):
-        for kind in ("r1", "dl0"):
+        for kind in ("r0", "r1", "dl0"):
             p = f"/{kind}/event/telescope/tel_{tel_id:03d}"
             if p in paths:
                 result[(kind, tel_id)] = read_table(path, p)
@@ -65,6 +71,20 @@ class _ThreadedFeed:
         self._stop = threading.Event()
         self._thread = None
 
+    def _pace(self, rate):
+        """Generator waiting between the events to push them at ``rate`` Hz; stops when stopped"""
+        period = 1.0 / rate
+        next_time = time.monotonic()
+        while True:
+            yield
+            next_time += period
+            delay = next_time - time.monotonic()
+            if delay < -1.0:
+                # too late (the pushing is slower than the rate): do not catch up
+                next_time = time.monotonic()
+            if self._stop.wait(max(delay, 0.0)) or self._stop.is_set():
+                return
+
     def run(self):
         raise NotImplementedError
 
@@ -80,9 +100,9 @@ class _ThreadedFeed:
             self._thread.join()
 
 
-class DemoFeed(_ThreadedFeed):
+class HDF5Feed(_ThreadedFeed):
     """
-    Replay a ctapipe HDF5 file into a store, in a background thread.
+    Push a ctapipe HDF5 file into a store.
 
     Parameters
     ----------
@@ -91,21 +111,31 @@ class DemoFeed(_ThreadedFeed):
     store : ViewerStore
         The store (its subarray is set from the file if it has none).
     rate : float
-        Events per second; 0 pushes the whole tables at once.
+        0 (default): the whole tables are pushed at once (`ViewerStore.push_table`: statistics
+        of all the events, every event browsable). Otherwise the events are replayed one after
+        the other at ``rate`` events per second (`ViewerStore.push_row`), as a live stream.
     loop : bool
-        Replay the file again when its end is reached.
+        Replay the file again when its end is reached (with a rate).
     """
 
-    def __init__(self, path, store, rate=5.0, loop=True, tel_ids=None):
+    def __init__(self, path, store, rate=0.0, loop=False, tel_ids=None):
         super().__init__()
         self.path = path
         self.store = store
         self.rate = float(rate)
         self.loop = loop
-        self.tables = read_tables(path, tel_ids)
-        if store.subarray is None:
-            store.set_subarray(SubarrayDescription.from_hdf(path))
-        store.source_description = f"demo replay of {path}" + (f" at {self.rate:g} Hz" if self.rate else "")
+        self.tel_ids = tel_ids
+        self._tables = None
+        store.add_telescopes(SubarrayDescription.from_hdf(path))
+        if not store.source_description:
+            store.source_description = f"replay of {path} at {self.rate:g} Hz" if self.rate > 0 else str(path)
+
+    @property
+    def tables(self):
+        """Tables of the file, read at the first use (in the thread of the feed)"""
+        if self._tables is None:
+            self._tables = read_tables(self.path, self.tel_ids)
+        return self._tables
 
     def events(self):
         """Rows of the file grouped by event, in the order of the events: lists of (kind, row)"""
@@ -126,13 +156,12 @@ class DemoFeed(_ThreadedFeed):
             self.push_tables()
             return
         events = self.events()
+        pace = self._pace(self.rate)
         while not self._stop.is_set():
-            for rows in events:
+            for rows, _ in zip(events, pace):
                 for kind, row in rows:
                     self.store.push_row(kind, row)
-                if self._stop.wait(1.0 / self.rate):
-                    return
-            if not self.loop:
+            if not self.loop or self._stop.is_set():
                 return
 
 
@@ -141,11 +170,11 @@ class EventSourceFeed(_ThreadedFeed):
     Read a file with a ctapipe ``EventSource`` (e.g. a simtel file, or a zfits file when
     sst1mpipe is installed), calibrate its events and compute their DL1 parameters
     (``CameraCalibrator`` and ``ImageProcessor`` with their default configuration) and push
-    them into a store with `ViewerStore.push_event`, in a background thread. With ``rate`` 0,
-    the events are pushed as fast as possible and the file is read only once.
+    them into a store with `ViewerStore.push_event`, event by event. With ``rate`` 0, the events
+    are pushed as fast as possible and the file is read only once.
     """
 
-    def __init__(self, path, store, rate=5.0, loop=True, max_events=None):
+    def __init__(self, path, store, rate=0.0, loop=False, max_events=None):
         from ctapipe.io import EventSource
 
         super().__init__()
@@ -156,9 +185,9 @@ class EventSourceFeed(_ThreadedFeed):
         self.max_events = max_events
         with EventSource(path, max_events=1) as source:
             subarray = source.subarray
-        if store.subarray is None:
-            store.set_subarray(subarray)
-        store.source_description = f"demo processing of {path}" + (f" at {self.rate:g} Hz" if self.rate else "")
+        store.add_telescopes(subarray)
+        if not store.source_description:
+            store.source_description = f"processing of {path}" + (f" at {self.rate:g} Hz" if self.rate > 0 else "")
 
     def run(self):
         from ctapipe.calib import CameraCalibrator
@@ -169,20 +198,19 @@ class EventSourceFeed(_ThreadedFeed):
             with EventSource(self.path, max_events=self.max_events) as source:
                 calibrator = CameraCalibrator(subarray=source.subarray)
                 processor = ImageProcessor(subarray=source.subarray)
-                for event in source:
+                pace = self._pace(self.rate) if self.rate > 0 else iter(int, 1)  # endless without rate
+                for event, _ in zip(source, pace):
                     calibrator(event)
                     processor(event)
                     self.store.push_event(event)
-                    if self.rate > 0 and self._stop.wait(1.0 / self.rate):
-                        return
                     if self._stop.is_set():
                         return
             if not self.loop or self.rate <= 0:
                 return
 
 
-def make_feed(path, store, rate=5.0, loop=True):
-    """`DemoFeed` for a HDF5 file, `EventSourceFeed` for the other files"""
+def make_feed(path, store, rate=0.0, loop=False):
+    """`HDF5Feed` for a HDF5 file, `EventSourceFeed` for the other files"""
     if str(path).endswith((".h5", ".hdf5")):
-        return DemoFeed(path, store, rate=rate, loop=loop)
+        return HDF5Feed(path, store, rate=rate, loop=loop)
     return EventSourceFeed(path, store, rate=rate, loop=loop)

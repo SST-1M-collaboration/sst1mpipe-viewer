@@ -65,7 +65,7 @@ def test_max_events_and_navigation(subarray):
     for i in range(5):
         store.push_row("dl1", dl1_row(i, intensity=np.nan if i == 4 else 100.0))
     assert store.event_keys(1) == [(1, 2), (1, 3), (1, 4)]
-    assert store.find_latest_key(1, "dl1", lambda row: np.isfinite(row["hillas_intensity"])) == (1, 3)
+    assert store.find_latest_key(1, "dl1", "hillas_intensity") == (1, 3)
 
 
 def test_push_from_threads(subarray):
@@ -101,11 +101,55 @@ def test_camera_maps_after_late_subarray(subarray):
     assert store.statistics(1)["accumulators"]["image_mask_fraction"]["n_entries"] == 1
 
 
-def test_tables_of_several_kinds_keep_the_events(subarray):
-    """A table of a kind does not push out the rows of the other kinds of the kept events"""
+def test_tables_keep_all_their_events(subarray):
+    """All the events of tables can be displayed (not only the last max_events), with all their kinds"""
     store = ViewerStore(subarray, max_events=3)
     store.push_table("dl1", Table(rows=[dl1_row(i) for i in range(10)]))
     store.push_table("r1", Table(rows=[r1_row(i) for i in range(10)]))
-    assert store.event_keys(1) == [(1, 7), (1, 8), (1, 9)]
+    assert store.event_keys(1) == [(1, i) for i in range(10)]
     assert all(set(store.event(1, key)) == {"dl1", "r1"} for key in store.event_keys(1))
     assert store.statistics(1)["n_rows"] == 10
+    assert not store.has_event_data
+    # events pushed one by one come after those of the tables
+    store.push_row("dl1", dl1_row(20))
+    assert store.event_keys(1)[-1] == (1, 20) and store.has_event_data
+
+
+def test_rows_and_table_give_the_same_statistics(subarray):
+    """The statistics filled event by event (buffered) and from a table are the same"""
+    rows = [dl1_row(i, intensity=10.0 * i) for i in range(1, 40)]
+    by_rows = ViewerStore(subarray, flush_size=7)  # several batches
+    for row in rows:
+        by_rows.push_row("dl1", row)
+    by_table = ViewerStore(subarray)
+    by_table.push_table("dl1", Table(rows=rows))
+    a, b = by_rows.statistics(1), by_table.statistics(1)
+    assert (a["n_rows"], a["n_selected"]) == (b["n_rows"], b["n_selected"]) == (39, 34)
+    for name, snapshot in a["accumulators"].items():
+        other = b["accumulators"][name]
+        for key in ("counts", "values"):
+            if key in snapshot:
+                assert np.allclose(snapshot[key], other[key], equal_nan=True), name
+
+
+def test_waveform_containers_are_converted_when_displayed(subarray):
+    from ctapipe.containers import R1CameraContainer
+
+    store = ViewerStore(subarray)
+    container = R1CameraContainer(waveform=r1_row(1)["waveform"], pixel_status=np.full(N_PIXELS, 4))
+    store.push_container("r1", container, obs_id=1, event_id=1, tel_id=1)
+    assert store.counts()[(1, "r1")] == 1 and store.latest_key(1, "r1") == (1, 1)
+    row = store.event(1, (1, 1))["r1"]
+    assert row["waveform"].shape == (1, N_PIXELS, 20) and row["tel_id"] == 1
+    # a second row of the same event is merged with it
+    store.push_row("r1", {"obs_id": 1, "event_id": 1, "tel_id": 1, "extra": 3.0})
+    assert {"waveform", "extra"} <= set(store.event(1, (1, 1))["r1"])
+
+
+def test_rates_stay_small(subarray):
+    """The arrivals of the rates are merged and pruned when pushing, without reading the rates"""
+    store = ViewerStore(subarray)
+    for i in range(500):
+        store.push_row("trigger", {"obs_id": 1, "event_id": i, "tel_id": 1, "event_type": 32})
+    assert len(store._arrivals[(1, "trigger")]) <= 2
+    assert store.rates()[(1, "trigger")] == 500 / 10.0

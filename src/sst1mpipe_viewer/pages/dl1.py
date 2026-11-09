@@ -16,14 +16,6 @@ __all__ = ["DL1EventPage", "DL1StatisticsPage"]
 SHOW_MASK, SHOW_ELLIPSE, ONLY_CLEANED = 0, 1, 2
 
 
-def has_hillas(row):
-    """Whether a DL1 row has valid Hillas parameters (the image survived the cleaning)"""
-    try:
-        return bool(np.isfinite(float(row.get("hillas_intensity", np.nan))))
-    except (TypeError, ValueError):
-        return False
-
-
 class DL1EventPage(Page):
     """Image and peak time of an event, with its cleaning mask, Hillas ellipse and parameters"""
 
@@ -50,7 +42,7 @@ class DL1EventPage(Page):
         session = self.session
         geometry = session.geometry()
         only_cleaned = ONLY_CLEANED in self.options.active
-        key = session.event_key("dl1", predicate=has_hillas if only_cleaned else None)
+        key = session.event_key("dl1", finite_column="hillas_intensity" if only_cleaned else None)
         rows = self.store.event(session.tel_id, key) if key is not None else {}
         data = rows.get("dl1")
         self.image.set_caption(event_description(key, rows))
