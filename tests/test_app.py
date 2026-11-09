@@ -27,7 +27,8 @@ def refresh_all(session):
 def test_all_pages_refresh(subarray):
     store, session = make_session(subarray)
     assert session.tel_ids == [1, 2]  # all the telescopes are selected at first
-    assert [p.title for p in session.pages] == ["Array", "R0", "R1", "DL0", "DL1 Event", "DL1 Statistics"]
+    assert [p.title for p in session.pages] == ["Array", "R0", "R1", "DL0", "DL1 Event", "DL1 Statistics",
+                                                "DL2 Event", "DL2 Statistics"]
     refresh_all(session)
     r0, r1 = session.pages[1], session.pages[2]
     # one block per selected telescope
@@ -155,8 +156,10 @@ def test_server_pages(subarray):
     store = ViewerStore(subarray)
     server = make_server(store, port=0, refresh_period=2000)
     try:
-        assert set(server._tornado.applications) == {"/", "/r0", "/r1", "/dl0", "/dl1", "/statistics"}
-        for path, title in (("/", "Array"), ("/r1", "R1"), ("/statistics", "DL1 Statistics")):
+        assert set(server._tornado.applications) == {"/", "/r0", "/r1", "/dl0", "/dl1", "/statistics", "/dl2",
+                                                       "/dl2_statistics"}
+        for path, title in (("/", "Array"), ("/r1", "R1"), ("/statistics", "DL1 Statistics"),
+                            ("/dl2_statistics", "DL2 Statistics")):
             doc = Document()
             server._tornado.applications[path].application.initialize_document(doc)
             assert doc.title == f"SST-1M Event Viewer – {title}"
@@ -239,3 +242,34 @@ def test_stream_keeps_following(subarray):
     store.push_row("dl1", dl1_row(1))
     session.tick()
     assert session.follow and session.event_key(1, "dl1") == (1, 1)
+
+
+def test_dl2_pages(subarray):
+    """DL2 Event: the DL1 image with the reconstructed source; DL2 Statistics"""
+    store = ViewerStore(subarray)
+    store.push_row("dl1", dl1_row(1))
+    store.push_row("dl2", dict(obs_id=1, event_id=1, tel_id=1, reco_energy=1.0, gammaness=0.8, reco_alt=70.0,
+                               reco_az=10.0, reco_src_x=0.1, reco_src_y=0.0))
+    session = Browser(store)
+    refresh_all(session)
+    page = session.pages[6]
+    camera = page.views[1].camera
+    assert camera._source_source.data["x"]  # the reconstructed source position
+    assert "gammaness" in page.fields.source.data["name"]
+    statistics = session.pages[7]
+    assert statistics.counters_source.data["rows"] == [1, 0]
+    assert statistics.hist1d[1].captions[1].text.startswith("TEL 1: N=1")
+
+
+def test_rate_panel():
+    """New bins are streamed, not all the points sent again"""
+    from sst1mpipe_viewer.components import RatePanel
+
+    panel = RatePanel("rates", {"a": ("A", "red")})
+    panel.update({"a": (np.array([1.0, 2.0]), np.array([5.0, 6.0]))})
+    source = panel.sources["a"]
+    assert list(source.data["time"]) == [1000.0, 2000.0]
+    panel.update({"a": (np.array([1.0, 2.0, 3.0]), np.array([5.0, 6.0, 7.0]))})
+    assert list(source.data["rate"]) == [5.0, 6.0, 7.0]
+    panel.update({"a": (np.array([1.0, 2.0, 3.0]), np.array([5.0, 6.0, 7.0]))}, visible=[])
+    assert not any(r.visible for r in panel.renderers["a"])

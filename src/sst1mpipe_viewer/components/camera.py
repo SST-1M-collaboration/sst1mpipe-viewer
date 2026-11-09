@@ -79,7 +79,11 @@ class CameraPanel:
         self._selected_source = ColumnDataSource(data=dict(xs=[], ys=[]))
         selected = self.figure.patches(xs="xs", ys="ys", source=self._selected_source, fill_color=None,
                                        line_color=selected_color, line_width=3)
-        self._overlays = [mask, selected, ellipse, cog]
+        # reconstructed source position (DL2)
+        self._source_source = ColumnDataSource(data=dict(x=[], y=[]))
+        source = self.figure.scatter(x="x", y="y", source=self._source_source, marker="star", size=18,
+                                     fill_color="#00e5ff", line_color="black", line_width=1)
+        self._overlays = [mask, selected, ellipse, cog, source]
 
         # the clicked pixel is found from the position of the click: the bokeh selection would
         # fade the other pixels
@@ -178,6 +182,7 @@ class CameraPanel:
             self.set_image(np.full(self.n_pixels, np.nan))
         self.set_mask(None)
         self.set_ellipse(None)
+        self.set_source(None)
 
     def set_mask(self, mask):
         """Outline the pixels of a boolean mask (None to remove)"""
@@ -211,6 +216,17 @@ class CameraPanel:
                 lon, lat, length, width, psi = values
                 data = dict(x=[lon], y=[lat], width=[2 * length], height=[2 * width], angle=[np.deg2rad(psi)])
         self._ellipse_source.data = data
+
+    def set_source(self, position):
+        """
+        Draw a star at a position ``(fov_lon, fov_lat)`` in deg, e.g. the reconstructed source
+        position of a DL2 event; None or a non finite position removes it.
+        """
+        data = dict(x=[], y=[])
+        if position is not None and all(np.isfinite(position)):
+            data = dict(x=[float(position[0])], y=[float(position[1])])
+        if data != self._source_source.data:
+            self._source_source.data = data
 
     # -------------------------------------------------------------- internal
     def pixel_at(self, x, y):

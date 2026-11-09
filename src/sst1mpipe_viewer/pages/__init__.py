@@ -1,8 +1,9 @@
-"""Pages (tabs) of the viewer"""
+"""Pages of the viewer: one web page per data level"""
 
 from .base import Page
-from .dl1 import DL1EventPage, DL1StatisticsPage
+from .events import ImageEventPage
 from .overview import OverviewPage
+from .statistics import StatisticsPage
 from .waveforms import WaveformPage
 
-__all__ = ["Page", "DL1EventPage", "DL1StatisticsPage", "OverviewPage", "WaveformPage"]
+__all__ = ["Page", "ImageEventPage", "OverviewPage", "StatisticsPage", "WaveformPage"]

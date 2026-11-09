@@ -3,13 +3,17 @@
 from bokeh.layouts import column, row
 from bokeh.models import CheckboxGroup, ColumnDataSource, DataTable, Div, RadioButtonGroup, TableColumn
 
-from ..components import ArrayMapPanel, ArrayPanel
+from ..components import ArrayMapPanel, ArrayPanel, RatePanel
 from ..components.array import earth_locations
 from ..store import KINDS
-from .base import Page, message_div
+from .base import LEVEL_NAMES, Page, message_div
 from .pixel_selection import PixelSelectionPanel
 
 __all__ = ["OverviewPage"]
+
+#: colors of the data levels in the rate plots
+LEVEL_COLORS = {"r0": "#1b9e77", "r1": "#d95f02", "dl0": "#7570b3", "dl1": "#e7298a", "dl2": "#66a61e",
+                "trigger": "#666666"}
 
 WELCOME = """
 <h2 style="margin: 0 0 6px 0">Welcome to the SST-1M event viewer</h2>
@@ -61,6 +65,14 @@ class OverviewPage(Page):
             [self._checkbox_tel_ids[i] for i in new]))
         self.telescope_colors = Div(text=" &nbsp; ".join(
             f"<span style='color: {session.color(t)}; font-weight: bold'>&#9632; TEL {t}</span>" for t in all_tel_ids))
+        # rates of each data level in time, one plot per telescope (for the shifter)
+        series = {kind: (LEVEL_NAMES[kind], LEVEL_COLORS[kind]) for kind in KINDS}
+        self.rate_panels = {}
+        for tel_id in all_tel_ids:
+            panel = RatePanel(f"Rates of TEL {tel_id}", series, width=1100, height=200)
+            panel.figure.title.text_color = session.color(tel_id)
+            self.rate_panels[tel_id] = panel
+        self.rates_container = column()
         # one pixel selection per telescope (each telescope has its own selection)
         self.pixel_selections = {}
         self.pixel_container = column()
@@ -71,6 +83,7 @@ class OverviewPage(Page):
                        self.telescopes, self.telescope_colors), self.array_container),
             Div(text="<h3 style='margin: 8px 0 0 0'>Data received</h3>"),
             self.summary,
+            self.rates_container,
             self.pixel_container,
         )
 
@@ -135,6 +148,11 @@ class OverviewPage(Page):
         if selected_tels != self._shown_tel_ids:
             self._shown_tel_ids = selected_tels
             self.pixel_container.children = [self.pixel_selections[t].layout for t in selected_tels]
+            self.rates_container.children = [self.rate_panels[t].layout for t in selected_tels
+                                             if t in self.rate_panels]
+        for tel_id in selected_tels:
+            if tel_id in self.rate_panels:
+                self.rate_panels[tel_id].update({kind: self.store.rate_history(tel_id, kind) for kind in KINDS})
         for tel_id in selected_tels:
             self.pixel_selections[tel_id].refresh()
         active = sorted({tel for (tel, _), rate in rates.items() if rate > 0})

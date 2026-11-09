@@ -3,14 +3,11 @@
 # hist1d:  {column, bins, range | edges, transform (log10, abs), unit, log_y, title}
 # hist2d:  {x, y, x_bins, x_range, y_bins, y_range, x_transform, y_transform, title}
 # camera:  {column, mode (mean | fraction), unit, title}
-# apply_cuts (default true) can be set on any entry.
 #
-# cuts: list of "<column> <op> <number>" applied to the entries with apply_cuts.
-cuts:
-  - "hillas_intensity > 50"
+# Every row received is accumulated: the selection of the events (cuts) is done by the pipeline.
 
 hist1d:
-  - {column: hillas_intensity, transform: log10, range: [0, 5], bins: 50, title: "log10(intensity / p.e.)", log_y: true, apply_cuts: false}
+  - {column: hillas_intensity, transform: log10, range: [0, 5], bins: 50, title: "log10(intensity / p.e.)", log_y: true}
   - {column: hillas_length, range: [0, 1.0], bins: 50, unit: deg}
   - {column: hillas_width, range: [0, 0.4], bins: 50, unit: deg}
   - {column: hillas_r, range: [0, 5], bins: 50, unit: deg}

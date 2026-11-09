@@ -30,7 +30,7 @@ def default_subarray_file():
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog="sst1mpipe-viewer",
-        description="Bokeh viewer of the SST-1M events (R0, R1, DL0, DL1) and of their accumulated statistics.",
+        description="Bokeh viewer of the SST-1M events (R0, R1, DL0, DL1, DL2) and of their accumulated statistics.",
     )
     parser.add_argument("--port", type=int, default=5006, help="port of the server (default: %(default)s)")
     parser.add_argument("--address", default=None, help="address of the server (default: all interfaces)")
@@ -45,7 +45,9 @@ def parse_args(argv=None):
                         " telescopes (default: the SST-1M subarray of sst1mpipe, sst1m_array.h5); the"
                         " telescopes of the files not in it are added")
     parser.add_argument("--statistics-config", type=Path, default=None,
-                        help="YAML configuration of the accumulated statistics")
+                        help="YAML configuration of the accumulated DL1 statistics (default: the one of the package)")
+    parser.add_argument("--dl2-statistics-config", type=Path, default=None,
+                        help="YAML configuration of the accumulated DL2 statistics (default: the one of the package)")
     parser.add_argument("--replay-rate", type=float, default=0.0, metavar="HZ",
                         help="push the events of the files one after the other at this rate (events per second),"
                         " as a live stream, instead of all at once")
@@ -78,7 +80,9 @@ def main(argv=None):
     else:
         log.info("Subarray %s (%s)", subarray.name, subarray_file)
 
-    store = ViewerStore(subarray=subarray, statistics_config=load_statistics_config(args.statistics_config))
+    configs = {"dl1": load_statistics_config(args.statistics_config, "dl1"),
+               "dl2": load_statistics_config(args.dl2_statistics_config, "dl2")}
+    store = ViewerStore(subarray=subarray, statistics_configs=configs)
     if args.files:
         feeds = [make_feed(path, store, rate=args.replay_rate) for path in args.files]
         store.source_description = ", ".join(str(path) for path in args.files) + (

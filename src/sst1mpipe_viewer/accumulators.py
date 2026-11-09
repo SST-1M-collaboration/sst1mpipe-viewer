@@ -7,15 +7,12 @@ current state for the display. An accumulator is filled only if its columns are 
 filled columns, so that the rows of any kind of data can be given to every accumulator.
 """
 
-import operator
-import re
 from abc import ABCMeta, abstractmethod
 
 import numpy as np
 
 __all__ = [
     "Accumulator",
-    "Cut",
     "Histogram1D",
     "Histogram2D",
     "CameraAccumulator",
@@ -47,50 +44,15 @@ def make_bins(bins=50, range=None, edges=None):
     return np.linspace(range[0], range[1], int(bins) + 1)
 
 
-_CUT_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*(<=|>=|==|!=|<|>)\s*([-+0-9.eE]+|nan|inf|-inf)\s*$")
-_OPERATORS = {
-    "<": operator.lt,
-    "<=": operator.le,
-    ">": operator.gt,
-    ">=": operator.ge,
-    "==": operator.eq,
-    "!=": operator.ne,
-}
-
-
-class Cut:
-    """A selection ``<column> <operator> <number>``, e.g. ``hillas_intensity > 50``"""
-
-    def __init__(self, expression):
-        match = _CUT_PATTERN.match(expression)
-        if match is None:
-            raise ValueError(
-                f"Invalid cut {expression!r}: expected '<column> <op> <number>' with op in {list(_OPERATORS)}"
-            )
-        self.column, self.op, value = match.groups()
-        self.value = float(value)
-        self._function = _OPERATORS[self.op]
-
-    def __call__(self, columns):
-        """Boolean mask of the rows which pass the cut"""
-        return self._function(np.asarray(columns[self.column], dtype=float), self.value)
-
-    def __str__(self):
-        return f"{self.column} {self.op} {self.value:g}"
-
-
 class Accumulator(metaclass=ABCMeta):
     """Base class of the accumulators"""
 
     #: name of the accumulator (unique in a `StatisticsSet`)
     name: str
-    #: whether the cuts of the StatisticsSet are applied
-    apply_cuts: bool = True
 
-    def __init__(self, name, title=None, apply_cuts=True):
+    def __init__(self, name, title=None):
         self.name = name
         self.title = title or name
-        self.apply_cuts = apply_cuts
         self.n_entries = 0
 
     @property
@@ -102,13 +64,11 @@ class Accumulator(metaclass=ABCMeta):
         """Whether the accumulator can be filled with these columns"""
         return all(name in columns for name in self.columns)
 
-    def fill(self, columns, mask=None):
-        """Fill with the rows of columns (only the rows of ``mask`` if given)"""
+    def fill(self, columns):
+        """Add the rows of ``columns`` (nothing is done if a needed column is missing)"""
         if not self.accepts(columns):
             return
         values = [np.asarray(columns[name]) for name in self.columns]
-        if mask is not None:
-            values = [v[mask] for v in values]
         if len(values[0]) == 0:
             return
         self._fill(*values)
@@ -280,22 +240,19 @@ class CameraAccumulator(Accumulator):
 
 class StatisticsSet:
     """
-    Set of accumulators sharing the same cuts. ``fill(columns)`` fills every accumulator
-    which accepts the columns, the rows being selected by the cuts for the accumulators
-    with ``apply_cuts``. Rows without the columns of the cuts do not fill these accumulators
-    (they are counted in ``n_without_cut_columns``).
+    The accumulators of a telescope for a data level (e.g. the DL1 histograms). ``fill(columns)``
+    gives the rows to every accumulator whose columns are present. There is no selection of the
+    rows: the data are shown as they are received (cuts belong to the pipeline, not the viewer).
     """
 
-    def __init__(self, accumulators=(), cuts=()):
+    def __init__(self, accumulators=()):
         self.accumulators = {}
         for accumulator in accumulators:
             self.add(accumulator)
-        self.cuts = [c if isinstance(c, Cut) else Cut(c) for c in cuts]
         self.n_rows = 0
-        self.n_selected = 0
-        self.n_without_cut_columns = 0
 
     def add(self, accumulator):
+        """Add an accumulator (its name must be unique)"""
         if accumulator.name in self.accumulators:
             raise ValueError(f"Duplicated accumulator name {accumulator.name!r}")
         self.accumulators[accumulator.name] = accumulator
@@ -306,55 +263,24 @@ class StatisticsSet:
     def __iter__(self):
         return iter(self.accumulators.values())
 
-    def selection(self, columns):
-        """Mask of the rows passing the cuts, None if a column of the cuts is missing"""
-        n = len(next(iter(columns.values())))
-        mask = np.ones(n, dtype=bool)
-        for cut in self.cuts:
-            if cut.column not in columns:
-                return None
-            with np.errstate(invalid="ignore"):
-                mask &= cut(columns)
-        return mask
-
     def fill(self, columns):
+        """Add the rows of ``columns`` to the accumulators which can use them"""
         accepting = [a for a in self if a.accepts(columns)]
         if not accepting:
             return
-        n = len(next(iter(columns.values())))
-        mask = self.selection(columns)
-        self.n_rows += n
-        if mask is None:
-            self.n_without_cut_columns += n
-        else:
-            self.n_selected += int(np.count_nonzero(mask))
+        self.n_rows += len(next(iter(columns.values())))
         for accumulator in accepting:
-            if not accumulator.apply_cuts or not self.cuts:
-                accumulator.fill(columns)
-            elif mask is not None:
-                accumulator.fill(columns, mask)
-
-    def set_cuts(self, cuts):
-        """Replace the cuts and reset the accumulators (filled with the previous cuts)"""
-        self.cuts = [c if isinstance(c, Cut) else Cut(c) for c in cuts]
-        self.reset()
+            accumulator.fill(columns)
 
     def reset(self, name=None):
-        """Reset one accumulator, or all of them and the counters"""
+        """Reset one accumulator, or all of them and the row counter"""
         if name is not None:
             self.accumulators[name].reset()
             return
         for accumulator in self:
             accumulator.reset()
         self.n_rows = 0
-        self.n_selected = 0
-        self.n_without_cut_columns = 0
 
     def snapshot(self):
-        return dict(
-            accumulators={name: a.snapshot() for name, a in self.accumulators.items()},
-            n_rows=self.n_rows,
-            n_selected=self.n_selected,
-            n_without_cut_columns=self.n_without_cut_columns,
-            cuts=[str(c) for c in self.cuts],
-        )
+        """Copy of the state of every accumulator, for the display"""
+        return dict(accumulators={name: a.snapshot() for name, a in self.accumulators.items()}, n_rows=self.n_rows)

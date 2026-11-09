@@ -1,4 +1,13 @@
-"""Configuration of the accumulated statistics (YAML, see ``resources/dl1_statistics.yaml``)"""
+"""
+Configuration of the accumulated statistics of a data level (YAML files, see
+``resources/dl1_statistics.yaml`` and ``resources/dl2_statistics.yaml``).
+
+A configuration lists the histograms of the statistics page of the level:
+
+- ``hist1d``: histograms of one column;
+- ``hist2d``: histograms of two columns (correlations);
+- ``camera``: per pixel maps of an image column (DL1).
+"""
 
 from importlib.resources import files
 from pathlib import Path
@@ -7,25 +16,62 @@ import yaml
 
 from .accumulators import CameraAccumulator, Histogram1D, Histogram2D, StatisticsSet, make_bins
 
-__all__ = ["DEFAULT_STATISTICS_CONFIG", "load_statistics_config", "build_statistics"]
+__all__ = ["STATISTICS_KINDS", "DEFAULT_STATISTICS_CONFIGS", "load_statistics_config", "build_statistics",
+           "display_options"]
 
-DEFAULT_STATISTICS_CONFIG = files("sst1mpipe_viewer") / "resources" / "dl1_statistics.yaml"
+#: data levels with accumulated statistics
+STATISTICS_KINDS = ("dl1", "dl2")
+
+#: default configuration file of each data level
+DEFAULT_STATISTICS_CONFIGS = {
+    kind: files("sst1mpipe_viewer") / "resources" / f"{kind}_statistics.yaml" for kind in STATISTICS_KINDS
+}
+
+SECTIONS = ("hist1d", "hist2d", "camera")
 
 
-def load_statistics_config(path=None):
-    """Statistics configuration (dict) read from ``path``, the default one if None"""
-    path = DEFAULT_STATISTICS_CONFIG if path is None else Path(path)
+def load_statistics_config(path=None, kind="dl1"):
+    """
+    Read a statistics configuration.
+
+    Parameters
+    ----------
+    path : str, Path or None
+        The YAML file; None for the default configuration of ``kind``.
+    kind : str
+        The data level (``"dl1"`` or ``"dl2"``), for the default configuration.
+
+    Returns
+    -------
+    dict
+        The configuration, ``{"hist1d": [...], "hist2d": [...], "camera": [...]}``.
+    """
+    path = DEFAULT_STATISTICS_CONFIGS[kind] if path is None else Path(path)
     with path.open() as f:
         config = yaml.safe_load(f) or {}
-    unknown = set(config) - {"cuts", "hist1d", "hist2d", "camera"}
+    unknown = set(config) - set(SECTIONS)
     if unknown:
-        raise ValueError(f"Unknown sections {sorted(unknown)} in the statistics configuration {path}")
+        raise ValueError(f"Unknown sections {sorted(unknown)} in the statistics configuration {path}"
+                         f" (known: {list(SECTIONS)})")
     return config
 
 
 def build_statistics(config, n_pixels):
-    """`StatisticsSet` of a statistics configuration, for a camera of ``n_pixels``"""
-    statistics = StatisticsSet(cuts=config.get("cuts", ()))
+    """
+    Create the accumulators of a configuration (empty).
+
+    Parameters
+    ----------
+    config : dict
+        A statistics configuration (`load_statistics_config`).
+    n_pixels : int
+        Number of pixels of the camera, for the camera maps.
+
+    Returns
+    -------
+    StatisticsSet
+    """
+    statistics = StatisticsSet()
     for spec in config.get("hist1d", ()):
         spec = dict(spec)
         column = spec.pop("column")
@@ -49,7 +95,7 @@ def build_statistics(config, n_pixels):
 
 
 def display_options(config):
-    """Display options of the histograms by name (``log_y``)"""
+    """Display options of the 1D histograms, by name: ``{name: {"log_y": bool}}``"""
     options = {}
     for spec in config.get("hist1d", ()):
         options[spec.get("name", spec["column"])] = {"log_y": bool(spec.get("log_y", False))}

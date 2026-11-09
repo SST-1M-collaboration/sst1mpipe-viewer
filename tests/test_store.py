@@ -28,28 +28,62 @@ def test_statistics_and_reset(subarray):
     store.push_table("dl1", table)
     snapshot = store.statistics(1)
     assert snapshot["n_rows"] == 10
-    assert snapshot["n_selected"] == 5  # default cut hillas_intensity > 50
-    assert snapshot["accumulators"]["hillas_intensity"]["n_entries"] == 10  # no cuts on the intensity
-    assert snapshot["accumulators"]["hillas_length"]["n_entries"] == 5
+    # every row is accumulated (no cuts in the viewer)
+    assert snapshot["accumulators"]["hillas_intensity"]["n_entries"] == 10
+    assert snapshot["accumulators"]["hillas_length"]["n_entries"] == 10
     assert np.allclose(snapshot["accumulators"]["image_mask_fraction"]["values"][:5], 1)
     assert len(snapshot["accumulators"]["image_mask_fraction"]["values"]) == N_PIXELS
 
     version = store.version
     store.reset_statistics(1, "hillas_length")
     assert store.statistics(1)["accumulators"]["hillas_length"]["n_entries"] == 0
-    assert store.statistics(1)["accumulators"]["hillas_width"]["n_entries"] == 5
+    assert store.statistics(1)["accumulators"]["hillas_width"]["n_entries"] == 10
     store.reset_statistics()
     assert store.statistics(1)["n_rows"] == 0
     assert store.version > version
 
 
-def test_set_cuts(subarray):
+def test_dl2(subarray):
+    """DL2 rows: statistics of their own, ctapipe columns shown with the names of sst1mpipe"""
     store = ViewerStore(subarray)
-    with pytest.raises(ValueError):
-        store.set_cuts(["not a cut"])
-    store.set_cuts(["hillas_intensity > 15"])
-    store.push_table("dl1", Table(rows=[dl1_row(i, intensity=10.0 * i) for i in range(1, 4)]))
-    assert store.statistics(1)["n_selected"] == 2
+    rows = [dict(obs_id=1, event_id=i, tel_id=1, reco_energy=10.0 ** (i - 2), gammaness=0.1 * i,
+                 reco_alt=70.0, reco_az=180.0, reco_src_x=0.1, reco_src_y=-0.1) for i in range(1, 6)]
+    store.push_table("dl2", Table(rows=rows))
+    snapshot = store.statistics(1, "dl2")
+    assert snapshot["n_rows"] == 5
+    assert snapshot["accumulators"]["gammaness"]["n_entries"] == 5
+    assert store.statistics(1)["n_rows"] == 0  # the DL1 statistics are separate
+    # ctapipe DL2 (DataWriter names), pushed event by event
+    store.push_row("dl2", dict(obs_id=1, event_id=9, tel_id=1, RandomForestRegressor_tel_energy=1.0,
+                               RandomForestClassifier_tel_prediction=0.9))
+    assert store.event(1, (1, 9))["dl2"]["gammaness"] == 0.9
+    assert store.statistics(1, "dl2")["accumulators"]["reco_energy"]["n_entries"] == 6
+    store.reset_statistics(kind="dl2")
+    assert store.statistics(1, "dl2")["n_rows"] == 0
+
+
+def test_rate_history(subarray, monkeypatch):
+    """Rows per second: by time of arrival (event by event), by time of the events (tables)"""
+    import sst1mpipe_viewer.store as store_module
+
+    now = [1000.2]
+    monkeypatch.setattr(store_module.time, "time", lambda: now[0])
+    store = ViewerStore(subarray)
+    for i in range(3):
+        store.push_row("dl1", dl1_row(i))
+    now[0] = 1001.5
+    store.push_row("dl1", dl1_row(10))
+    times, rates = store.rate_history(1, "dl1")
+    assert times.tolist() == [1000.0] and rates.tolist() == [3.0]  # the current second is not complete
+
+    # tables: the times of the events, from the table with a time column (here the trigger table)
+    tables = ViewerStore(subarray)
+    tables.push_table("dl1", Table(rows=[dl1_row(i) for i in range(4)]))
+    assert len(tables.rate_history(1, "dl1")[0]) == 0  # no time yet
+    tables.push_table("trigger", Table(dict(obs_id=[1] * 4, event_id=list(range(4)), tel_id=[1] * 4,
+                                            time=[100.1, 100.5, 101.2, 103.9])))
+    times, rates = tables.rate_history(1, "dl1")
+    assert times.tolist() == [100.0, 101.0, 102.0, 103.0] and rates.tolist() == [2, 1, 0, 1]
 
 
 def test_invalid_input(subarray):
@@ -124,7 +158,7 @@ def test_rows_and_table_give_the_same_statistics(subarray):
     by_table = ViewerStore(subarray)
     by_table.push_table("dl1", Table(rows=rows))
     a, b = by_rows.statistics(1), by_table.statistics(1)
-    assert (a["n_rows"], a["n_selected"]) == (b["n_rows"], b["n_selected"]) == (39, 34)
+    assert a["n_rows"] == b["n_rows"] == 39
     for name, snapshot in a["accumulators"].items():
         other = b["accumulators"][name]
         for key in ("counts", "values"):

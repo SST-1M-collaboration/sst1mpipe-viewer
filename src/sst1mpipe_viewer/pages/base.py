@@ -1,29 +1,34 @@
-"""Base class of the pages (tabs) of the viewer"""
+"""Base class of the pages of the viewer, and helpers shared by the pages"""
 
 from astropy.time import Time
-from bokeh.models import Div
+from bokeh.layouts import row
+from bokeh.models import Button, Div
 from ctapipe.containers import EventType
 
-__all__ = ["Page", "message_div", "event_description"]
+from ..components import RatePanel
+
+__all__ = ["Page", "LevelRates", "message_div", "event_description", "telescope_header"]
+
+#: names of the data levels in the titles
+LEVEL_NAMES = {"r0": "R0", "r1": "R1", "dl0": "DL0", "dl1": "DL1", "dl2": "DL2", "trigger": "trigger"}
 
 
 def message_div(text=""):
+    """A line of text for the messages of a page (e.g. "No R1 data in this event.")"""
     return Div(text=text, styles={"font-size": "11pt", "color": "#666", "padding": "4px 0"}, width=900, height=28)
-
-
-
 
 
 def _first_value(rows, names):
     """First value of one of the columns ``names`` in the rows ``{kind: row}``"""
     for name in names:
-        for row in rows.values():
-            if name in row:
-                return row[name]
+        for values in rows.values():
+            if name in values:
+                return values[name]
     return None
 
 
 def event_type_name(value):
+    """Name of a ctapipe event type (e.g. ``SUBARRAY``), the value itself if unknown"""
     try:
         return EventType(int(value)).name
     except (ValueError, TypeError):
@@ -58,7 +63,7 @@ def event_description(key, rows):
 class Page:
     """
     A page of the viewer. ``layout`` is its bokeh layout, ``refresh()`` updates it from the
-    store (called when the page is shown and when the store or the session state change).
+    store (called when the page is opened, and when the data or the state of the user change).
     """
 
     title = ""
@@ -70,14 +75,29 @@ class Page:
         self.store = session.store
 
     def refresh(self):
+        """Update the page from the store and the state of the user"""
         raise NotImplementedError
+
+
+class LevelRates:
+    """Rates of the data of a level received from the selected telescopes, in time (one line per telescope)"""
+
+    def __init__(self, session, kind, width=1000, height=200):
+        self.session, self.kind = session, kind
+        series = {tel_id: (f"TEL {tel_id}", session.color(tel_id)) for tel_id in session.all_tel_ids}
+        self.panel = RatePanel(f"Rate of the {LEVEL_NAMES.get(kind, kind)} data received", series, width=width,
+                               height=height)
+        self.layout = self.panel.layout
+
+    def refresh(self):
+        """Show the rates of the selected telescopes"""
+        tel_ids = self.session.tel_ids
+        store = self.session.store
+        self.panel.update({tel_id: store.rate_history(tel_id, self.kind) for tel_id in tel_ids}, visible=tel_ids)
 
 
 def telescope_header(session, tel_id):
     """Header of the block of a telescope in a page: its name in its color, its own Prev / Next"""
-    from bokeh.layouts import row
-    from bokeh.models import Button, Div
-
     title = Div(text=f"<h3 style='margin: 4px 0 0 0; color: {session.color(tel_id)}'>TEL {tel_id}</h3>", width=70)
     prev_button = Button(label="◀", width=36, height=28)
     next_button = Button(label="▶", width=36, height=28)

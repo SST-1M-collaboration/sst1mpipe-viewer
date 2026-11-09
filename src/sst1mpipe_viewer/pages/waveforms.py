@@ -6,7 +6,7 @@ from bokeh.models import Div, Select, Slider
 
 from ..components import FieldsTable, WaveformPanel
 from ..components.waveform import waveform_2d
-from .base import Page, event_description, message_div, telescope_header
+from .base import LevelRates, Page, event_description, message_div, telescope_header
 from .trigger import TRACE_FIELDS, TriggerView, trace_fields
 
 __all__ = ["WaveformPage", "field_shapes", "sample_image"]
@@ -175,11 +175,13 @@ class WaveformPage(Page):
         controls = [self.waveform_field, self.channel, self.pixel_field]
         if kind == "r0":
             controls += [self.trace]
+        self.rates = LevelRates(session, kind)
         self.views = {tel_id: _TelescopeWaveforms(self, tel_id) for tel_id in session.all_tel_ids}
         self.views_container = column()
         self.fields = FieldsTable(width=1000, height=400)
         self._shown_tel_ids = None
         self.layout = column(
+            self.rates.layout,
             row(*controls),
             self.views_container,
             Div(text="<h3 style='margin: 10px 0 0 0'>All the fields of the events</h3>"),
@@ -199,6 +201,7 @@ class WaveformPage(Page):
         session = self.session
         tel_ids = session.tel_ids
         self._set_views(tel_ids)
+        self.rates.refresh()
         events = {}
         for tel_id in tel_ids:
             geometry = session.geometry(tel_id)

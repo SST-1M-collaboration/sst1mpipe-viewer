@@ -8,8 +8,8 @@ reset resets them for everyone).
 Two ways of giving data
 -----------------------
 - **Event by event** (``push_event``, ``push_container``, ``push_row``), e.g. a live stream:
-  the last ``max_events`` events of each telescope are kept for the display, the DL1 rows fill
-  the statistics. Pushing is cheap (rates of several kHz): the statistics are filled in
+  the last ``max_events`` events of each telescope are kept for the display, the DL1 and DL2
+  rows fill the statistics. Pushing is cheap (rates of several kHz): the statistics are filled in
   vectorized batches (when they are read, or every ``flush_size`` rows) and the parameters of
   sst1mpipe in the camera frame are converted when needed (`sst1mpipe_viewer.frames`).
 - **Tables** (``push_table``), e.g. a file: all the rows are processed at once (vectorized) and
@@ -17,13 +17,20 @@ Two ways of giving data
 
 Kinds of data
 -------------
-``r0``, ``r1``, ``dl0``, ``dl1`` and ``trigger``: the rows are those of the ctapipe tables
-(``/r1/event/telescope/tel_XXX``, ``/dl1/event/telescope/images/tel_XXX`` and
-``/dl1/event/telescope/parameters/tel_XXX``, ``/dl1/event/telescope/trigger``, ...) or the
-flattened containers of these levels (`sst1mpipe_viewer.normalize.container_to_dict`).
+``r0``, ``r1``, ``dl0``, ``dl1``, ``dl2`` and ``trigger``: the rows are those of the ctapipe
+tables (``/r1/event/telescope/tel_XXX``, ``/dl1/event/telescope/images/tel_XXX`` and
+``/dl1/event/telescope/parameters/tel_XXX``, ``/dl2/event/telescope/parameters/tel_XXX`` of
+sst1mpipe, ``/dl1/event/telescope/trigger``, ...) or the flattened containers of these levels
+(`sst1mpipe_viewer.normalize.container_to_dict`).
 Every row needs ``obs_id``, ``event_id`` and ``tel_id`` (given in the row or as keywords).
 The rows of the same event (``obs_id``, ``event_id``) of a telescope are merged, e.g. a DL1
 image row and a DL1 parameter row, or a R1 row and its trigger row.
+
+Rates
+-----
+The number of rows received per second is kept for each telescope and data level
+(`rate_history`): by time of arrival for the rows pushed event by event (the last hour), by time
+of the events for the tables (the trigger time of their events).
 """
 
 import threading
@@ -35,18 +42,26 @@ import numpy as np
 from ctapipe.coordinates import GroundFrame
 from ctapipe.instrument import SubarrayDescription
 
-from .accumulators import CameraAccumulator, Cut
-from .config import build_statistics, load_statistics_config
+from .accumulators import CameraAccumulator
+from .config import STATISTICS_KINDS, build_statistics, load_statistics_config
+from .dl2 import add_dl2_aliases
 from .frames import CAMERA_FRAME_PREFIX, add_telescope_frame_parameters
 from .normalize import KEY_COLUMNS, n_rows, to_columns
 
 __all__ = ["KINDS", "ViewerStore"]
 
 #: kinds of data accepted by the store
-KINDS = ("r0", "r1", "dl0", "dl1", "trigger")
+KINDS = ("r0", "r1", "dl0", "dl1", "dl2", "trigger")
 
 #: time window (s) of the rates of received rows
 RATE_WINDOW = 10.0
+#: duration (s) of the bins of the rate histories, and their number for the live data (1 hour)
+RATE_BIN = 1.0
+RATE_HISTORY_BINS = 3600
+#: maximum number of bins of the rate history of tables (the bins are longer for long files)
+MAX_TABLE_RATE_BINS = 2000
+#: columns with the time of the events (unix seconds in the tables)
+TIME_COLUMNS = ("time", "event_time")
 
 
 #: kinds whose containers pushed event by event are converted only when displayed
@@ -93,8 +108,11 @@ class _Tables:
         self.keys = []
         self.positions = {}  # key -> position in keys
         self.kinds = {}  # kind -> list of (columns, {key: row})
+        self.times = {}  # key -> time of the event (unix s), from the tables with a time column
+        self.version = 0  # incremented at each table added
 
     def add(self, kind, columns):
+        """Add a table of a data level (its columns)"""
         keys = list(zip(np.asarray(columns["obs_id"]).astype(int).tolist(),
                         np.asarray(columns["event_id"]).astype(int).tolist()))
         rows = {}
@@ -104,6 +122,17 @@ class _Tables:
                 self.positions[key] = len(self.keys)
                 self.keys.append(key)
         self.kinds.setdefault(kind, []).append((columns, rows))
+        time_column = next((name for name in TIME_COLUMNS if name in columns), None)
+        if time_column is not None and np.issubdtype(np.asarray(columns[time_column]).dtype, np.number):
+            self.times.update(zip(keys, np.asarray(columns[time_column], dtype=float).tolist()))
+        self.version += 1
+
+    def event_times(self, kind):
+        """Times (unix s) of the events of the tables of a data level (from any table with times)"""
+        times = []
+        for _, rows in self.kinds.get(kind, ()):
+            times += [self.times.get(key, np.nan) for key in rows]
+        return np.asarray(times, dtype=float)
 
     def event(self, key):
         result = {}
@@ -137,19 +166,21 @@ class ViewerStore:
     subarray : ctapipe.instrument.SubarrayDescription or None
         Subarray of the data (camera geometries, telescope positions). It can be set later
         with `set_subarray`.
-    statistics_config : dict or None
-        Configuration of the statistics (`sst1mpipe_viewer.config.load_statistics_config`),
-        the default one if None.
+    statistics_configs : dict or None
+        Configuration of the statistics of each data level ``{"dl1": config, "dl2": config}``
+        (`sst1mpipe_viewer.config.load_statistics_config`), the default one for a missing level.
     max_events : int
         Number of events pushed event by event kept per telescope (for the display).
     flush_size : int
-        Number of DL1 rows pushed event by event after which the statistics are filled.
+        Number of DL1 / DL2 rows pushed event by event after which the statistics are filled.
     """
 
-    def __init__(self, subarray=None, statistics_config=None, max_events=200, flush_size=2000):
+    def __init__(self, subarray=None, statistics_configs=None, max_events=200, flush_size=2000):
         self._lock = threading.RLock()
         self.subarray = subarray
-        self.statistics_config = statistics_config if statistics_config is not None else load_statistics_config()
+        configs = dict(statistics_configs or {})
+        self.statistics_configs = {kind: configs.get(kind) or load_statistics_config(kind=kind)
+                                   for kind in STATISTICS_KINDS}
         self.max_events = int(max_events)
         self.flush_size = int(flush_size)
         self.source_description = ""
@@ -161,11 +192,13 @@ class ViewerStore:
         self._tables = {}  # tel_id -> _Tables, pushed as tables
         self._latest = {}  # (tel_id, kind) -> (obs_id, event_id)
         self._counts = Counter()  # (tel_id, kind) -> number of rows received
-        self._arrivals = {}  # (tel_id, kind) -> deque of (time, n rows)
-        self._statistics = {}  # tel_id -> StatisticsSet
-        self._pending = {}  # tel_id -> list of DL1 columns not yet in the statistics
+        self._arrivals = {}  # (tel_id, kind) -> deque of [time, n rows] of the last RATE_WINDOW s
+        self._history = {}  # (tel_id, kind) -> deque of [second (unix), n rows] of the last hour
+        self._table_history = {}  # (tel_id, kind) -> (tables version, (times, rates)), cache
+        self._statistics = {}  # (kind, tel_id) -> StatisticsSet
+        self._pending = {}  # (kind, tel_id) -> list of columns not yet in the statistics
         self._n_pending = 0
-        self._needed_columns = None
+        self._needed_columns = {}  # kind -> columns used by the statistics
 
     # ------------------------------------------------------------------ input
     def set_subarray(self, subarray):
@@ -173,10 +206,10 @@ class ViewerStore:
         with self._lock:
             self.subarray = subarray
             # statistics created without the camera geometry have no camera maps: rebuild them
-            for tel_id, statistics in list(self._statistics.items()):
+            for (kind, tel_id), statistics in list(self._statistics.items()):
                 cameras = [a for a in statistics if isinstance(a, CameraAccumulator)]
                 if any(a.n_pixels == 0 for a in cameras) and tel_id in subarray.tel:
-                    del self._statistics[tel_id]
+                    del self._statistics[(kind, tel_id)]
             self.version += 1
 
     def add_telescopes(self, subarray):
@@ -223,13 +256,17 @@ class ViewerStore:
 
     def push_event(self, event):
         """
-        Push the data of a ctapipe ``ArrayEventContainer``: the R0, R1, DL0, DL1 and
+        Push the data of a ctapipe ``ArrayEventContainer``: the R0, R1, DL0, DL1, DL2 and
         trigger containers of its telescopes.
         """
         keys = dict(obs_id=event.index.obs_id, event_id=event.index.event_id)
         for kind in ("r0", "r1", "dl0", "dl1"):
             for tel_id, container in getattr(event, kind).tel.items():
                 self.push_container(kind, container, tel_id=tel_id, **keys)
+        for tel_id, reconstructed in event.dl2.tel.items():
+            row = _telescope_dl2_row(reconstructed)
+            if row:
+                self.push_row("dl2", row, tel_id=tel_id, **keys)
         for tel_id, container in event.trigger.tel.items():
             columns = to_columns(container, tel_id=tel_id, **keys)
             columns.update(to_columns({"event_type": event.trigger.event_type}))
@@ -238,7 +275,7 @@ class ViewerStore:
     def push_table(self, kind, table, *, obs_id=None, event_id=None, tel_id=None):
         """
         Push the rows of a table (an astropy table): all of them are processed at once, the
-        DL1 rows fill the statistics and every event of the table can be displayed.
+        DL1 and DL2 rows fill the statistics and every event of the table can be displayed.
         """
         columns = self._check(kind, to_columns(table, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
         if columns is None:
@@ -246,27 +283,31 @@ class ViewerStore:
         now = time.monotonic()
         with self._lock:
             for tel_id, tel_columns in self._split_telescopes(columns):
-                if kind == "dl1":
+                if kind in STATISTICS_KINDS:
                     tel_columns = self._telescope_frame(tel_id, tel_columns)
-                    self._tel_statistics(tel_id, tel_columns).fill(tel_columns)
+                    self._tel_statistics(kind, tel_id, tel_columns).fill(tel_columns)
                 self._tables.setdefault(tel_id, _Tables()).add(kind, tel_columns)
                 if not self._events.get(tel_id):
                     # the events pushed one by one (a stream) stay the latest ones
                     self._latest[(tel_id, kind)] = (int(tel_columns["obs_id"][-1]),
                                                     int(tel_columns["event_id"][-1]))
-                self._count(tel_id, kind, n_rows(tel_columns), now)
+                self._count(tel_id, kind, n_rows(tel_columns), now, history=False)
             self.version += 1
 
     def _check(self, kind, columns):
+        """The columns of pushed rows (None if there is no row), checked; DL2 with the viewer names"""
         if kind not in KINDS:
             raise ValueError(f"Unknown kind {kind!r}, known: {KINDS}")
         missing = [name for name in KEY_COLUMNS if name not in columns]
         if missing:
             raise ValueError(f"Missing columns {missing} in the {kind} data (or give them as keywords)")
+        if kind == "dl2":
+            columns = add_dl2_aliases(columns)
         return columns if n_rows(columns) else None
 
     @staticmethod
     def _split_telescopes(columns):
+        """(tel_id, columns of its rows) of the telescopes of the rows"""
         tel_ids = np.asarray(columns["tel_id"]).astype(int)
         unique = np.unique(tel_ids)
         if len(unique) == 1:
@@ -275,7 +316,11 @@ class ViewerStore:
         for tel_id in unique:
             yield int(tel_id), _select(columns, tel_ids == tel_id)
 
-    def _count(self, tel_id, kind, n, now):
+    def _count(self, tel_id, kind, n, now, history=True):
+        """
+        Count ``n`` rows received at ``now`` (monotonic time): for the current rates, and with
+        ``history`` in the rate history (per second of arrival)
+        """
         self._counts[(tel_id, kind)] += n
         arrivals = self._arrivals.setdefault((tel_id, kind), deque())
         # rows within 0.1 s are counted together, the arrivals out of the window are dropped:
@@ -286,6 +331,13 @@ class ViewerStore:
             arrivals.append([now, n])
         while arrivals and arrivals[0][0] < now - RATE_WINDOW:
             arrivals.popleft()
+        if history:
+            second = int(time.time() // RATE_BIN)
+            bins = self._history.setdefault((tel_id, kind), deque(maxlen=RATE_HISTORY_BINS))
+            if bins and bins[-1][0] == second:
+                bins[-1][1] += n
+            else:
+                bins.append([second, n])
 
     def _keep_event(self, tel_id, key, kind, row):
         """Keep a row (or a `_LazyRow`) of a pushed event, in the last events of the telescope"""
@@ -327,34 +379,36 @@ class ViewerStore:
                 self._keep_event(int(tel_ids[i]), key, kind, _row(columns, i))
             for tel_id, tel_columns in self._split_telescopes(columns):
                 self._count(tel_id, kind, n_rows(tel_columns), now)
-                if kind == "dl1":
-                    self._buffer(tel_id, tel_columns)
+                if kind in STATISTICS_KINDS:
+                    self._buffer(kind, tel_id, tel_columns)
             if self._n_pending >= self.flush_size:
                 self._flush()
             self.version += 1
 
     # ------------------------------------------------------------- statistics
-    def _needed(self):
-        """Columns used by the statistics (and to compute them in the telescope frame)"""
-        if self._needed_columns is None:
-            statistics = build_statistics(self.statistics_config, n_pixels=0)
+    def _needed(self, kind):
+        """Columns used by the statistics of a data level"""
+        if kind not in self._needed_columns:
+            statistics = build_statistics(self.statistics_configs[kind], n_pixels=0)
             names = {name for accumulator in statistics for name in accumulator.columns}
-            names |= {cut.column for cut in statistics.cuts}
-            names |= {"tel_id", "obs_id", "event_id"}
-            self._needed_columns = names
-        return self._needed_columns
+            self._needed_columns[kind] = names | {"tel_id", "obs_id", "event_id"}
+        return self._needed_columns[kind]
 
-    def _buffer(self, tel_id, columns):
-        needed = self._needed()
+    def _buffer(self, kind, tel_id, columns):
+        """Keep rows pushed event by event for the statistics (only their columns used by the statistics)"""
+        needed = self._needed(kind)
+        # the parameters in the camera frame are kept to be converted to the telescope frame
         kept = {name: values for name, values in columns.items()
                 if name in needed or name.startswith(CAMERA_FRAME_PREFIX)}
-        self._pending.setdefault(tel_id, []).append(kept)
+        self._pending.setdefault((kind, tel_id), []).append(kept)
         self._n_pending += n_rows(columns)
 
-    def _flush(self, tel_id=None):
-        """Fill the statistics with the buffered DL1 rows (of one telescope or of all)"""
-        for tel in ([tel_id] if tel_id is not None else list(self._pending)):
-            chunks = self._pending.pop(tel, [])
+    def _flush(self, tel_id=None, kind=None):
+        """Fill the statistics with the buffered rows (of one telescope / data level, or of all)"""
+        for key in list(self._pending):
+            if (kind is not None and key[0] != kind) or (tel_id is not None and key[1] != tel_id):
+                continue
+            chunks = self._pending.pop(key)
             # rows with the same columns are filled together
             groups = {}
             for chunk in chunks:
@@ -362,8 +416,8 @@ class ViewerStore:
                 self._n_pending -= n_rows(chunk)
             for names, group in groups.items():
                 columns = {name: np.concatenate([chunk[name] for chunk in group]) for name in names}
-                columns = self._telescope_frame(tel, columns)
-                self._tel_statistics(tel, columns).fill(columns)
+                columns = self._telescope_frame(key[1], columns)
+                self._tel_statistics(*key, columns).fill(columns)
 
     def _telescope_frame(self, tel_id, columns):
         """Telescope frame parameters from the camera frame parameters of sst1mpipe, if needed"""
@@ -372,15 +426,17 @@ class ViewerStore:
             return columns
         return add_telescope_frame_parameters(columns, subarray.tel[tel_id].camera.geometry.frame)
 
-    def _tel_statistics(self, tel_id, columns=None):
-        statistics = self._statistics.get(tel_id)
+    def _tel_statistics(self, kind, tel_id, columns=None):
+        """The statistics of a data level of a telescope (created at the first use)"""
+        statistics = self._statistics.get((kind, tel_id))
         if statistics is None:
             n_pixels = 0
             if self.subarray is not None and tel_id in self.subarray.tel:
                 n_pixels = self.subarray.tel[tel_id].camera.geometry.n_pixels
             elif columns is not None and "image" in columns:
                 n_pixels = np.shape(columns["image"])[1]
-            statistics = self._statistics[tel_id] = build_statistics(self.statistics_config, n_pixels)
+            statistics = build_statistics(self.statistics_configs[kind], n_pixels)
+            self._statistics[(kind, tel_id)] = statistics
         return statistics
 
     # ----------------------------------------------------------------- output
@@ -458,13 +514,14 @@ class ViewerStore:
             pushed = self._events.get(tel_id, {}).get(key, {})
             for kind, row in pushed.items():
                 result[kind] = {**result.get(kind, {}), **_as_row(row)}
-        dl1 = result.get("dl1")
-        if dl1 is not None and "hillas_fov_lon" not in dl1:
-            # parameters in the camera frame (sst1mpipe): converted for the display
-            columns = {name: np.asarray(value)[np.newaxis, ...] for name, value in dl1.items()}
-            converted = self._telescope_frame(tel_id, columns)
-            if converted is not columns:
-                result["dl1"] = {name: values[0] for name, values in converted.items()}
+        for kind in ("dl1", "dl2"):
+            row = result.get(kind)
+            if row is not None and "hillas_fov_lon" not in row:
+                # parameters in the camera frame (sst1mpipe): converted for the display
+                columns = {name: np.asarray(value)[np.newaxis, ...] for name, value in row.items()}
+                converted = self._telescope_frame(tel_id, columns)
+                if converted is not columns:
+                    result[kind] = {name: values[0] for name, values in converted.items()}
         return result
 
     def counts(self):
@@ -483,35 +540,50 @@ class ViewerStore:
                 rates[key] = sum(n for _, n in arrivals) / RATE_WINDOW
         return rates
 
-    def statistics(self, tel_id):
-        """Snapshot of the statistics of a telescope (see `StatisticsSet.snapshot`)"""
+    def rate_history(self, tel_id, kind):
+        """
+        Number of rows of a telescope and data level received per second, in time.
+
+        The rows pushed event by event are counted by time of arrival (the last hour, the current
+        second excluded: it is not complete); the rows of tables by time of their events (the
+        tables of the event times, e.g. the trigger table, are needed).
+
+        Returns
+        -------
+        times, rates : numpy arrays
+            Start of the bins (unix s) and rates (rows per second) in the bins.
+        """
         with self._lock:
-            self._flush(tel_id)
-            return self._tel_statistics(tel_id).snapshot()
+            bins = self._history.get((tel_id, kind))
+            if bins:
+                current = int(time.time() // RATE_BIN)
+                complete = [b for b in bins if b[0] < current]
+                times = np.array([b[0] * RATE_BIN for b in complete], dtype=float)
+                return times, np.array([b[1] / RATE_BIN for b in complete], dtype=float)
+            tables = self._tables.get(tel_id)
+            if tables is None:
+                return np.empty(0), np.empty(0)
+            cached = self._table_history.get((tel_id, kind))
+            if cached is None or cached[0] != tables.version:
+                cached = (tables.version, _histogram_rates(tables.event_times(kind)))
+                self._table_history[(tel_id, kind)] = cached
+            return cached[1]
+
+    def statistics(self, tel_id, kind="dl1"):
+        """Snapshot of the statistics of a data level of a telescope (see `StatisticsSet.snapshot`)"""
+        with self._lock:
+            self._flush(tel_id, kind)
+            return self._tel_statistics(kind, tel_id).snapshot()
 
     # ---------------------------------------------------------------- control
-    def reset_statistics(self, tel_id=None, name=None):
-        """Reset the statistics: of one accumulator ``name``, of a telescope, or of all of them"""
+    def reset_statistics(self, tel_id=None, name=None, kind="dl1"):
+        """Reset the statistics of a data level: of one accumulator ``name``, of a telescope, or of all"""
         with self._lock:
             # the buffered rows were received before the reset
-            if tel_id is None:
-                self._flush()
-            else:
-                self._flush(tel_id)
-            tel_ids = list(self._statistics) if tel_id is None else [tel_id]
+            self._flush(tel_id, kind)
+            tel_ids = [t for k, t in self._statistics if k == kind] if tel_id is None else [tel_id]
             for tel in tel_ids:
-                self._tel_statistics(tel).reset(name)
-            self.version += 1
-
-    def set_cuts(self, cuts):
-        """Set the cuts of the statistics of all the telescopes (and reset them)"""
-        cuts = [str(Cut(c)) for c in cuts]  # validate before changing anything
-        with self._lock:
-            self._flush()
-            self.statistics_config = {**self.statistics_config, "cuts": cuts}
-            self._needed_columns = None
-            for statistics in self._statistics.values():
-                statistics.set_cuts(cuts)
+                self._tel_statistics(kind, tel).reset(name)
             self.version += 1
 
     def clear(self):
@@ -519,3 +591,31 @@ class ViewerStore:
         with self._lock:
             self._clear()
             self.version += 1
+
+
+def _histogram_rates(times):
+    """Rates (per second) of events at ``times`` (unix s): (start of the bins, rates)"""
+    times = times[np.isfinite(times)]
+    if len(times) == 0:
+        return np.empty(0), np.empty(0)
+    start = np.floor(times.min() / RATE_BIN) * RATE_BIN
+    span = times.max() - start
+    # bins of RATE_BIN, longer for a long file
+    width = RATE_BIN * max(1, int(np.ceil(span / RATE_BIN / MAX_TABLE_RATE_BINS)))
+    edges = start + width * np.arange(int(span // width) + 2)
+    counts, _ = np.histogram(times, bins=edges)
+    return edges[:-1], counts / width
+
+
+def _telescope_dl2_row(reconstructed):
+    """
+    Row of a ctapipe ``TelescopeReconstructedContainer`` (energy, particle type and geometry of
+    each algorithm), with the column names of the ctapipe tables: ``<algorithm>_tel_<field>``
+    """
+    row = {}
+    for group in ("energy", "particle_type", "geometry"):
+        for algorithm, container in reconstructed[group].items():
+            for field, value in container.items():
+                if field != "telescopes" and not isinstance(value, (dict, list)):
+                    row[f"{algorithm}_tel_{field}"] = value
+    return row

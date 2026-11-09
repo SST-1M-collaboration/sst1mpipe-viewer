@@ -20,6 +20,10 @@ _UNITS = (
     (re.compile(r"^camera_frame_hillas_intensity$"), "p.e."),
     (re.compile(r"^camera_frame_timing_slope$"), "ns / m"),
     (re.compile(r"^camera_frame_timing_intercept$"), "ns"),
+    # DL2 (sst1mpipe names, see sst1mpipe_viewer.dl2)
+    (re.compile(r"^reco_energy(_uncert)?$"), "TeV"),
+    (re.compile(r"^reco_(alt|az)(_uncert)?$"), "deg"),
+    (re.compile(r"^reco_(src_x|src_y|disp_norm|disp_dx|disp_dy|core_x|core_y|h_max)$"), "m"),
 )
 
 

@@ -1,6 +1,6 @@
 """
 Bokeh documents of the viewer: one web page per data level (Array, R0, R1, DL0, DL1 Event,
-DL1 Statistics), with a header (navigation, displayed events, pixel selection).
+DL1 Statistics, DL2 Event, DL2 Statistics), with a header (navigation, displayed events).
 
 The pages opened by a browser share a `UserState`: the selected telescopes (chosen in the Array
 page), the displayed event of each telescope and the selected pixels. It is found by the client id
@@ -23,7 +23,7 @@ from ctapipe.coordinates import TelescopeFrame
 
 from .colors import telescope_color
 from .components import CameraPanel
-from .pages import DL1EventPage, DL1StatisticsPage, OverviewPage, WaveformPage
+from .pages import ImageEventPage, OverviewPage, StatisticsPage, WaveformPage
 
 __all__ = ["PAGES", "StateRegistry", "UserState", "ViewerSession", "make_document"]
 
@@ -45,9 +45,14 @@ PAGES = {
     "r0": ("/r0", "R0", lambda session: WaveformPage(session, "r0")),
     "r1": ("/r1", "R1", lambda session: WaveformPage(session, "r1")),
     "dl0": ("/dl0", "DL0", lambda session: WaveformPage(session, "dl0")),
-    "dl1": ("/dl1", "DL1 Event", DL1EventPage),
-    "statistics": ("/statistics", "DL1 Statistics", DL1StatisticsPage),
+    "dl1": ("/dl1", "DL1 Event", lambda session: ImageEventPage(session, "dl1")),
+    "statistics": ("/statistics", "DL1 Statistics", lambda session: StatisticsPage(session, "dl1")),
+    "dl2": ("/dl2", "DL2 Event", lambda session: ImageEventPage(session, "dl2")),
+    "dl2_statistics": ("/dl2_statistics", "DL2 Statistics", lambda session: StatisticsPage(session, "dl2")),
 }
+
+#: pages of accumulated statistics (refreshed less often: many figures)
+STATISTICS_PAGES = ("statistics", "dl2_statistics")
 
 
 @functools.cache
@@ -136,7 +141,7 @@ class ViewerSession:
         _, title, factory = PAGES[page]
         self.page = factory(self)
         # every refresh of the many figures of the statistics page lays the page out again
-        self.page.min_interval = statistics_period if page == "statistics" else event_period
+        self.page.min_interval = statistics_period if page in STATISTICS_PAGES else event_period
 
         # the SST-1M logo (from sst1m.space) is white: it is shown on a dark banner
         banner = Div(

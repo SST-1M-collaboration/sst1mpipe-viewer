@@ -31,13 +31,30 @@ TELESCOPE_TABLES = (
     "/dl0/event/telescope/tel_",
     "/dl1/event/telescope/images/tel_",
     "/dl1/event/telescope/parameters/tel_",
+    "/dl2/event/telescope/",
 )
+
+#: DL2 tables of ctapipe, ``/dl2/event/telescope/<group>/<algorithm>/tel_XXX``
+DL2_GROUPS = ("energy", "classification", "geometry")
 
 
 def read_tables(path, tel_ids=None):
     """
-    Tables ``{(kind, tel_id): table}`` of the R0, R1, DL0 and DL1 data and of the telescope
-    triggers of a ctapipe HDF5 file (the DL1 images and parameters of an event are joined).
+    Read the tables of a ctapipe HDF5 file.
+
+    Parameters
+    ----------
+    path : str or Path
+        The file (written by ``ctapipe-process`` or by sst1mpipe).
+    tel_ids : iterable or None
+        Telescopes to read, all if None.
+
+    Returns
+    -------
+    dict
+        ``{(kind, tel_id): astropy table}`` of the R0, R1, DL0, DL1 and DL2 data and of the
+        telescope triggers. The DL1 images and parameters of an event are joined, and the DL2
+        tables of ctapipe (energy, classification, geometry of each algorithm).
     """
     with tables.open_file(path) as h5file:
         paths = {node._v_pathname for node in h5file.walk_nodes("/", "Table")}
@@ -57,11 +74,29 @@ def read_tables(path, tel_ids=None):
             result[("dl1", tel_id)] = join(read_table(path, dl1[0]), read_table(path, dl1[1]), keys=KEYS)
         elif dl1:
             result[("dl1", tel_id)] = read_table(path, dl1[0])
+        dl2 = _read_dl2(path, paths, tel_id)
+        if dl2 is not None:
+            result[("dl2", tel_id)] = dl2
     if "/dl1/event/telescope/trigger" in paths:
         trigger = read_table(path, "/dl1/event/telescope/trigger")
         for tel_id in sorted(file_tel_ids):
             result[("trigger", tel_id)] = trigger[trigger["tel_id"] == tel_id]
     return result
+
+
+def _read_dl2(path, paths, tel_id):
+    """DL2 table of a telescope: of sst1mpipe, or the DL2 tables of ctapipe joined (None if none)"""
+    name = f"tel_{tel_id:03d}"
+    sst1mpipe = f"/dl2/event/telescope/parameters/{name}"
+    if sst1mpipe in paths:
+        return read_table(path, sst1mpipe)
+    table = None
+    for p in sorted(paths):
+        parts = p.split("/")  # "", "dl2", "event", "telescope", group, algorithm, tel_XXX
+        if len(parts) == 7 and p.startswith("/dl2/event/telescope/") and parts[4] in DL2_GROUPS and parts[6] == name:
+            other = read_table(path, p)
+            table = other if table is None else join(table, other, keys=KEYS)
+    return table
 
 
 class _ThreadedFeed:

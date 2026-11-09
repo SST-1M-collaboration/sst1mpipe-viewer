@@ -14,7 +14,7 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 from ctapipe.coordinates import TelescopeFrame
 
-__all__ = ["CAMERA_FRAME_PREFIX", "add_telescope_frame_parameters"]
+__all__ = ["CAMERA_FRAME_PREFIX", "add_telescope_frame_parameters", "source_telescope_frame"]
 
 CAMERA_FRAME_PREFIX = "camera_frame_"
 _REQUIRED = tuple(f"{CAMERA_FRAME_PREFIX}hillas_{name}" for name in ("x", "y", "length", "width", "psi"))
@@ -83,3 +83,18 @@ def add_telescope_frame_parameters(columns, camera_frame):
                 np.asarray(columns[f"{CAMERA_FRAME_PREFIX}timing_slope"], dtype=float) * flip / scale_length
             )
     return result
+
+
+def source_telescope_frame(row, camera_frame):
+    """
+    Reconstructed source position of a DL2 row of sst1mpipe (``reco_src_x``, ``reco_src_y`` in m,
+    camera frame) in the telescope frame: ``(fov_lon, fov_lat)`` in deg, None if unknown.
+    """
+    try:
+        x, y = float(row["reco_src_x"]), float(row["reco_src_y"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (np.isfinite(x) and np.isfinite(y)):
+        return None
+    lon, lat = _to_telescope_frame(np.array([x]), np.array([y]), camera_frame)
+    return float(lon[0]), float(lat[0])

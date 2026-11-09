@@ -1,7 +1,6 @@
 import numpy as np
-import pytest
 
-from sst1mpipe_viewer.accumulators import CameraAccumulator, Cut, Histogram1D, Histogram2D, StatisticsSet, make_bins
+from sst1mpipe_viewer.accumulators import CameraAccumulator, Histogram1D, Histogram2D, StatisticsSet, make_bins
 from sst1mpipe_viewer.config import build_statistics, load_statistics_config
 
 
@@ -41,30 +40,25 @@ def test_histogram2d_and_camera():
     assert np.allclose(c.values, [0, 0.5])  # the NaN value is not counted
 
 
-def test_cuts():
-    assert str(Cut("hillas_intensity>50")) == "hillas_intensity > 50"
-    with pytest.raises(ValueError):
-        Cut("__import__('os')")
-
-    statistics = StatisticsSet(
-        [Histogram1D("x", "x", make_bins(2, (0, 2))), Histogram1D("all", "x", make_bins(2, (0, 2)), apply_cuts=False)],
-        cuts=["s > 1"],
-    )
-    statistics.fill({"x": np.array([0.5, 1.5]), "s": np.array([0, 2])})
-    assert statistics["x"].counts.tolist() == [0, 1]
-    assert statistics["all"].counts.tolist() == [1, 1]
-    # without the cut column, only the accumulators without cuts are filled
-    statistics.fill({"x": np.array([0.5])})
-    assert statistics["x"].n_entries == 1 and statistics["all"].n_entries == 3
-    assert statistics.n_without_cut_columns == 1
-
+def test_statistics_set():
+    """Every row is accumulated (no cuts in the viewer); the accumulators without their columns are skipped"""
+    bins = make_bins(2, (0, 2))
+    statistics = StatisticsSet([Histogram1D("x", "x", bins), Histogram1D("y", "y", bins)])
+    statistics.fill({"x": np.array([0.5, 1.5])})
+    assert statistics["x"].counts.tolist() == [1, 1] and statistics["y"].n_entries == 0
+    assert statistics.n_rows == 2
     statistics.reset("x")
-    assert statistics["x"].n_entries == 0 and statistics["all"].n_entries == 3
-    statistics.set_cuts([])
-    assert statistics["all"].n_entries == 0 and statistics.cuts == []
+    assert statistics["x"].n_entries == 0 and statistics.n_rows == 2
+    statistics.reset()
+    assert statistics.n_rows == 0
 
 
 def test_default_configuration():
     statistics = build_statistics(load_statistics_config(), n_pixels=1296)
     names = {a.name for a in statistics}
     assert {"hillas_intensity", "hillas_length", "image_mask_fraction"} <= names
+
+
+def test_default_dl2_configuration():
+    statistics = build_statistics(load_statistics_config(kind="dl2"), n_pixels=1296)
+    assert {"reco_energy", "gammaness", "reco_alt", "reco_az"} <= {a.name for a in statistics}
