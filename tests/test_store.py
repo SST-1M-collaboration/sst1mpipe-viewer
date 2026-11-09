@@ -99,3 +99,13 @@ def test_camera_maps_after_late_subarray(subarray):
     store.set_subarray(subarray)
     store.push_row("dl1", dl1_row(2))
     assert store.statistics(1)["accumulators"]["image_mask_fraction"]["n_entries"] == 1
+
+
+def test_tables_of_several_kinds_keep_the_events(subarray):
+    """A table of a kind does not push out the rows of the other kinds of the kept events"""
+    store = ViewerStore(subarray, max_events=3)
+    store.push_table("dl1", Table(rows=[dl1_row(i) for i in range(10)]))
+    store.push_table("r1", Table(rows=[r1_row(i) for i in range(10)]))
+    assert store.event_keys(1) == [(1, 7), (1, 8), (1, 9)]
+    assert all(set(store.event(1, key)) == {"dl1", "r1"} for key in store.event_keys(1))
+    assert store.statistics(1)["n_rows"] == 10

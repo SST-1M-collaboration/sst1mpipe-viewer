@@ -25,6 +25,7 @@ import numpy as np
 
 from .accumulators import CameraAccumulator, Cut
 from .config import build_statistics, load_statistics_config
+from .frames import add_telescope_frame_parameters
 from .normalize import KEY_COLUMNS, iter_rows, n_rows, to_columns
 
 __all__ = ["KINDS", "ViewerStore"]
@@ -115,9 +116,11 @@ class ViewerStore:
         n = n_rows(columns)
         if n == 0:
             return
+        if kind == "dl1":
+            columns = self._telescope_frame_parameters(columns)
         now = time.monotonic()
         with self._lock:
-            for row in iter_rows(columns):
+            for row in iter_rows(self._last_rows(columns)):
                 tel_id = int(row["tel_id"])
                 key = (int(row["obs_id"]), int(row["event_id"]))
                 events = self._events.setdefault(tel_id, OrderedDict())
@@ -144,6 +147,48 @@ class ViewerStore:
                     tel_columns = columns if n_tel == n else {k: v[selected] for k, v in columns.items()}
                     self._tel_statistics(tel_id, tel_columns).fill(tel_columns)
             self.version += 1
+
+    def _last_rows(self, columns):
+        """
+        The last `max_events` rows of each telescope: only these are kept as events, so that a
+        table does not push out of the kept events the rows of the other kinds of the same events
+        (all the rows fill the statistics)
+        """
+        tel_ids = np.asarray(columns["tel_id"]).astype(int)
+        keep = np.zeros(len(tel_ids), dtype=bool)
+        for tel_id in np.unique(tel_ids):
+            keep[np.flatnonzero(tel_ids == tel_id)[-self.max_events:]] = True
+        if keep.all():
+            return columns
+        return {name: values[keep] for name, values in columns.items()}
+
+    def _telescope_frame_parameters(self, columns):
+        """
+        Columns with the telescope frame parameters computed from the camera frame ones of
+        sst1mpipe (`sst1mpipe_viewer.frames`), with the camera frames of the subarray
+        """
+        subarray = self.subarray
+        if subarray is None or "hillas_fov_lon" in columns:
+            return columns
+        tel_ids = np.asarray(columns["tel_id"]).astype(int)
+        unique = np.unique(tel_ids)
+        if len(unique) == 1:
+            tel_id = int(unique[0])
+            if tel_id not in subarray.tel:
+                return columns
+            return add_telescope_frame_parameters(columns, subarray.tel[tel_id].camera.geometry.frame)
+        # rows of several telescopes: converted per telescope (NaN for the unknown telescopes)
+        converted = {}
+        for tel_id in unique:
+            selected = tel_ids == tel_id
+            if int(tel_id) not in subarray.tel:
+                continue
+            frame = subarray.tel[int(tel_id)].camera.geometry.frame
+            tel_columns = add_telescope_frame_parameters({k: v[selected] for k, v in columns.items()}, frame)
+            for name, values in tel_columns.items():
+                if name not in columns:
+                    converted.setdefault(name, np.full(len(tel_ids), np.nan))[selected] = values
+        return {**columns, **converted}
 
     def _tel_statistics(self, tel_id, columns=None):
         statistics = self._statistics.get(tel_id)

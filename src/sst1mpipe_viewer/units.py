@@ -13,6 +13,13 @@ _UNITS = (
     (re.compile(r"^timing_intercept$"), "ns"),
     (re.compile(r"^peak_time_(max|min|mean|std)$"), "ns"),
     (re.compile(r"^(hillas_intensity|intensity_(max|min|mean|std))$"), "p.e."),
+    # parameters in the camera frame (sst1mpipe)
+    (re.compile(r"^camera_frame_hillas_(x|y|r|length|width)(_uncertainty)?$"), "m"),
+    (re.compile(r"^camera_frame_hillas_transverse_cog_uncertainty$"), "m"),
+    (re.compile(r"^camera_frame_hillas_(phi|psi)(_uncertainty)?$"), "deg"),
+    (re.compile(r"^camera_frame_hillas_intensity$"), "p.e."),
+    (re.compile(r"^camera_frame_timing_slope$"), "ns / m"),
+    (re.compile(r"^camera_frame_timing_intercept$"), "ns"),
 )
 
 

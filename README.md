@@ -29,11 +29,13 @@ in an environment with ctapipe 0.32 (e.g. the sst1mpipe environment).
 ## Usage
 
 ```
-sst1mpipe-viewer --demo events.dl1.h5 --rate 5
+sst1mpipe-viewer --demo tests/data/mrk421_tel21_tel22.dl1.h5 --rate 5
 ```
 
-replays a ctapipe HDF5 file (written by `ctapipe-process` or `sst1mpipe-process`, with the DL1
-images and parameters and optionally the R1/DL0 waveforms) at 5 events per second, and
+replays the Mrk 421 test file (DL1 of the two SST-1M telescopes processed by sst1mpipe, see
+`tests/data/README.md`; `git lfs pull` to get it) at 5 events per second. Any ctapipe HDF5 file
+written by `ctapipe-process` or `sst1mpipe-process`, with the DL1 images and parameters and
+optionally the R1/DL0 waveforms, can be replayed the same way, and
 
 ```
 sst1mpipe-viewer --demo run.simtel.gz
@@ -64,7 +66,9 @@ ctapipe HDF5 tables: a container is flattened as by the ctapipe `DataWriter` (it
 name, the fields of its sub-containers take their prefix: `image`, `peak_time`, `image_mask`,
 `hillas_intensity`, `leakage_intensity_width_2`, ...). Every row needs `obs_id`, `event_id` and
 `tel_id`; the rows of the same event of a telescope are merged (e.g. a DL1 image row and a DL1
-parameter row). The statistics are filled with the `dl1` rows.
+parameter row). The statistics are filled with the `dl1` rows. The DL1 parameters in the camera frame written by
+sst1mpipe (`camera_frame_hillas_*`, in m) are converted to the telescope frame (`hillas_fov_lon`,
+`hillas_length`, ... in deg) with the camera geometry of the subarray.
 
 The interface between the pipeline (files, ZMQ stream) and the viewer is not part of this package
 yet: `sst1mpipe_viewer.demo` only replays files.
