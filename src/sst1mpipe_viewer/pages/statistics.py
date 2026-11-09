@@ -88,8 +88,8 @@ class StatisticsPage(Page):
         self.maps = {}
         if maps:
             for tel_id in all_tel_ids:
-                panel = session.camera_panel(title="", on_pixel_click=session.pixel_click(tel_id), width=420,
-                                             height=380)
+                panel = session.camera_panel(geometry=session.geometry(tel_id), title="",
+                                             on_pixel_click=session.pixel_click(tel_id), width=420, height=380)
                 panel.figure.title.text_color = colors[tel_id]
                 self.maps[tel_id] = panel
         self._map_states = {}

@@ -157,12 +157,14 @@ class ViewerSession:
         self.layout = column(banner, Div(text=self._navigation_html(), width=1400, height=34), controls,
                              self.status, self.page.layout)
 
+        # the first refresh is done before the page is in the document: the changes of the models
+        # of a document are slow (bokeh indexes all its models again when references change), and
+        # it is in the initial document sent to the browser
+        self.tick()
         if doc is not None:
             doc.title = f"SST-1M Event Viewer – {title}"
             doc.add_root(self.layout)
             doc.add_periodic_callback(self.tick, refresh_period)
-        # the first refresh is in the initial document sent to the browser
-        self.tick()
 
     @property
     def pages(self):

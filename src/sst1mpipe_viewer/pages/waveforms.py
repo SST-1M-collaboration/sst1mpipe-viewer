@@ -72,11 +72,13 @@ class _TelescopeWaveforms:
         # the sample of the waveforms and of the trigger traces shown in the cameras (per telescope)
         self.sample = Slider(title="Sample", start=0, end=1, value=0, step=1, width=400)
         self.sample.on_change("value_throttled", lambda attr, old, new: page.refresh())
-        self.camera = session.camera_panel(title="Waveforms", on_pixel_click=session.pixel_click(tel_id),
-                                           width=400, height=370)
+        # the cameras are created with their geometry (cheaper than setting it later)
+        geometry = session.geometry(tel_id)
+        self.camera = session.camera_panel(geometry=geometry, title="Waveforms",
+                                           on_pixel_click=session.pixel_click(tel_id), width=400, height=370)
         self.waveforms = WaveformPanel(title="Waveforms", y_label=WAVEFORM_UNITS.get(page.kind, ""), width=520,
                                        height=370)
-        self.field_camera = session.camera_panel(title="Pixel field", cmap=session.field_colormap,
+        self.field_camera = session.camera_panel(geometry=geometry, title="Pixel field", cmap=session.field_colormap,
                                                  on_pixel_click=session.pixel_click(tel_id), width=400,
                                                  height=370)
         self.trigger = TriggerView(session, tel_id) if page.kind == "r0" else None
@@ -206,7 +208,7 @@ class WaveformPage(Page):
         for tel_id in tel_ids:
             geometry = session.geometry(tel_id)
             key = session.event_key(tel_id, self.kind)
-            rows = self.store.event(tel_id, key) if key is not None else {}
+            rows = self.store.event(tel_id, key, (self.kind, "trigger")) if key is not None else {}
             data = rows.get(self.kind)
             shapes = field_shapes(data, geometry.n_pixels) if data is not None and geometry is not None else None
             events[tel_id] = (key, rows, data, geometry, shapes)

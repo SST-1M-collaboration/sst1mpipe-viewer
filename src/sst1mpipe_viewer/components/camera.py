@@ -62,6 +62,7 @@ class CameraPanel:
         self._selected = []
         self._geometry = None
         self._color_bar = None
+        self._empty = False  # cleared, nothing shown
 
         self._ellipse_source = ColumnDataSource(data=dict(x=[], y=[], width=[], height=[], angle=[]))
         ellipse = self.figure.ellipse(
@@ -118,6 +119,7 @@ class CameraPanel:
             return
         self._geometry = geometry
         self.display.geometry = geometry
+        self._empty = False
         data = self.display.datasource.data
         if geometry.pix_type.name in ("HEXAGON", "SQUARE"):
             self._xs, self._ys = data["xs"], data["ys"]
@@ -173,16 +175,22 @@ class CameraPanel:
         values = np.asarray(values, dtype=float)
         if values.shape != (self.n_pixels,):
             raise ValueError(f"Expected {self.n_pixels} values, got an array of shape {values.shape}")
-        self.display.datasource.patch({"values": [(slice(None), values)]})
+        # a numpy column, replaced at once: sent in binary, and not validated value by value by
+        # bokeh (as a list or a patch of the column would be: slow)
+        self.display.datasource.data["values"] = values
         self._rescale(values)
+        self._empty = False
 
     def clear(self):
-        """Show an empty camera"""
+        """Show an empty camera (nothing is sent if it is already empty)"""
+        if self._empty:
+            return
         if self._geometry is not None:
             self.set_image(np.full(self.n_pixels, np.nan))
         self.set_mask(None)
         self.set_ellipse(None)
         self.set_source(None)
+        self._empty = True
 
     def set_mask(self, mask):
         """Outline the pixels of a boolean mask (None to remove)"""

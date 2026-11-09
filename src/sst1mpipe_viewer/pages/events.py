@@ -30,9 +30,9 @@ class _TelescopeImage:
 
     def __init__(self, session, tel_id):
         self.header = telescope_header(session, tel_id)
-        self.message = message_div()
-        self.camera = session.camera_panel(title="Image", on_pixel_click=session.pixel_click(tel_id), width=460,
-                                           height=430)
+        self.message = message_div(width=330)  # the cameras of the telescopes are side by side
+        self.camera = session.camera_panel(geometry=session.geometry(tel_id), title="Image",
+                                           on_pixel_click=session.pixel_click(tel_id), width=460, height=430)
         self.layout = column(row(self.header, self.message), self.camera.layout)
         self.shown = False  # an event is displayed
 
@@ -72,6 +72,7 @@ class ImageEventPage(Page):
         self.views_container = row()
         self.fields = FieldsTable(width=1000, height=470)
         self._shown_tel_ids = None
+        self._source_position = (None, None)  # (tel_id, key), position of the source: the last one
         self.layout = column(
             self.rates.layout,
             row(self.pixel_field, column(Div(text=""), self.options)),
@@ -97,7 +98,7 @@ class ImageEventPage(Page):
         events = {}
         for tel_id in tel_ids:
             key = session.event_key(tel_id, self.kind, finite_column=finite_column)
-            rows = self.store.event(tel_id, key) if key is not None else {}
+            rows = self.store.event(tel_id, key, ("dl1", "dl2", "trigger")) if key is not None else {}
             events[tel_id] = (key, rows, session.geometry(tel_id))
         return events
 
@@ -123,6 +124,15 @@ class ImageEventPage(Page):
                 table[tel_id] = {self.kind: data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
             self._show(tel_id, view, key, rows, data, geometry)
         self.fields.set_rows(table)
+
+    def _source(self, tel_id, key, data):
+        """Reconstructed source position of a DL2 event in the telescope frame (converted once per event)"""
+        if self._source_position[0] != (tel_id, key):
+            subarray = self.store.subarray
+            frame = subarray.tel[tel_id].camera.geometry.frame if subarray is not None else None
+            position = source_telescope_frame(data, frame) if frame is not None else None
+            self._source_position = ((tel_id, key), position)
+        return self._source_position[1]
 
     def _show(self, tel_id, view, key, rows, data, geometry):
         """Show the event of a telescope in its camera"""
@@ -156,7 +166,5 @@ class ImageEventPage(Page):
         hillas = image if "hillas_fov_lon" in image else data
         camera.set_ellipse(hillas if SHOW_ELLIPSE in self.options.active else None)
         if self.kind == "dl2":
-            subarray = self.store.subarray
-            frame = subarray.tel[tel_id].camera.geometry.frame if subarray is not None else None
-            camera.set_source(source_telescope_frame(data, frame) if frame is not None else None)
+            camera.set_source(self._source(tel_id, key, data))
         camera.set_selected(session.selected_pixels(tel_id))

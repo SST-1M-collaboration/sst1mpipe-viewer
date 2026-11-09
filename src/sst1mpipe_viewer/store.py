@@ -60,6 +60,8 @@ RATE_BIN = 1.0
 RATE_HISTORY_BINS = 3600
 #: maximum number of bins of the rate history of tables (the bins are longer for long files)
 MAX_TABLE_RATE_BINS = 2000
+#: number of rows converted to the telescope frame kept for the display
+CONVERTED_CACHE_SIZE = 64
 #: columns with the time of the events (unix seconds in the tables)
 TIME_COLUMNS = ("time", "event_time")
 
@@ -134,9 +136,12 @@ class _Tables:
             times += [self.times.get(key, np.nan) for key in rows]
         return np.asarray(times, dtype=float)
 
-    def event(self, key):
+    def event(self, key, kinds=None):
+        """Rows ``{kind: row}`` of an event (of the data levels ``kinds``, all if None)"""
         result = {}
         for kind, tables in self.kinds.items():
+            if kinds is not None and kind not in kinds:
+                continue
             for columns, rows in tables:
                 if key in rows:
                     result[kind] = {**result.get(kind, {}), **_row(columns, rows[key])}
@@ -199,6 +204,7 @@ class ViewerStore:
         self._pending = {}  # (kind, tel_id) -> list of columns not yet in the statistics
         self._n_pending = 0
         self._needed_columns = {}  # kind -> columns used by the statistics
+        self._converted = {}  # (tel_id, key, kind, n columns) -> row converted to the telescope frame
 
     # ------------------------------------------------------------------ input
     def set_subarray(self, subarray):
@@ -506,23 +512,52 @@ class ViewerStore:
                 position = None
             return position, len(known) + len(ring)
 
-    def event(self, tel_id, key):
-        """Data of an event of a telescope, ``{kind: row}`` (empty if unknown)"""
+    def event(self, tel_id, key, kinds=None):
+        """
+        Data of an event of a telescope.
+
+        Parameters
+        ----------
+        tel_id : int
+        key : tuple
+            ``(obs_id, event_id)`` of the event.
+        kinds : iterable or None
+            Data levels to read (e.g. ``("r1", "trigger")``), all if None: only the rows of these
+            levels are converted for the display.
+
+        Returns
+        -------
+        dict
+            ``{kind: row}``, empty if the event is unknown.
+        """
         with self._lock:
             tables = self._tables.get(tel_id)
-            result = tables.event(key) if tables is not None and key in tables.positions else {}
+            result = tables.event(key, kinds) if tables is not None and key in tables.positions else {}
             pushed = self._events.get(tel_id, {}).get(key, {})
             for kind, row in pushed.items():
-                result[kind] = {**result.get(kind, {}), **_as_row(row)}
+                if kinds is None or kind in kinds:
+                    result[kind] = {**result.get(kind, {}), **_as_row(row)}
         for kind in ("dl1", "dl2"):
             row = result.get(kind)
             if row is not None and "hillas_fov_lon" not in row:
-                # parameters in the camera frame (sst1mpipe): converted for the display
-                columns = {name: np.asarray(value)[np.newaxis, ...] for name, value in row.items()}
-                converted = self._telescope_frame(tel_id, columns)
-                if converted is not columns:
-                    result[kind] = {name: values[0] for name, values in converted.items()}
+                result[kind] = self._converted_row(tel_id, key, kind, row)
         return result
+
+    def _converted_row(self, tel_id, key, kind, row):
+        """
+        A row with the parameters of sst1mpipe in the camera frame, with their telescope frame values
+        for the display. The conversion (astropy) is slow: the last rows converted are kept, all the
+        pages showing the same events.
+        """
+        cache_key = (tel_id, key, kind, len(row))  # a row of an event merged with a new row is longer
+        converted = self._converted.get(cache_key)
+        if converted is None:
+            columns = {name: np.asarray(value)[np.newaxis, ...] for name, value in row.items()}
+            converted = {name: values[0] for name, values in self._telescope_frame(tel_id, columns).items()}
+            self._converted[cache_key] = converted
+            while len(self._converted) > CONVERTED_CACHE_SIZE:
+                self._converted.pop(next(iter(self._converted)))
+        return converted
 
     def counts(self):
         """Number of rows received, ``{(tel_id, kind): n}``"""

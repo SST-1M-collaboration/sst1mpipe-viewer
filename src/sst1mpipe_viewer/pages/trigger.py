@@ -49,7 +49,8 @@ class TriggerView:
         self.session = session
         self.tel_id = tel_id
         self.groups = pixel_groups()
-        self.camera = session.camera_panel(title="Trigger patches", on_pixel_tap=self.tapped, width=width,
+        self.camera = session.camera_panel(geometry=patch_geometry(session.geometry(tel_id)),
+                                           title="Trigger patches", on_pixel_tap=self.tapped, width=width,
                                            height=height)
         self.traces = WaveformPanel(title="Trigger traces", y_label="trigger trace", item_label="patch",
                                     width=520, height=height)

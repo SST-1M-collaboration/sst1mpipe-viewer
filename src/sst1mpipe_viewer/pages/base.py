@@ -13,9 +13,9 @@ __all__ = ["Page", "LevelRates", "message_div", "event_description", "telescope_
 LEVEL_NAMES = {"r0": "R0", "r1": "R1", "dl0": "DL0", "dl1": "DL1", "dl2": "DL2", "trigger": "trigger"}
 
 
-def message_div(text=""):
+def message_div(text="", width=900):
     """A line of text for the messages of a page (e.g. "No R1 data in this event.")"""
-    return Div(text=text, styles={"font-size": "11pt", "color": "#666", "padding": "4px 0"}, width=900, height=28)
+    return Div(text=text, styles={"font-size": "11pt", "color": "#666", "padding": "4px 0"}, width=width, height=28)
 
 
 def _first_value(rows, names):
