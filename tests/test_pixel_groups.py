@@ -124,22 +124,22 @@ def test_array_on_a_map(digicam):
     assert np.allclose(x, [0, 20037508.34], atol=1) and np.allclose(y, 0)
 
     session = Browser(ViewerStore(digicam))
-    overview = session.pages[0]
-    overview.refresh()
-    assert list(overview.array_panels) == ["Map (OpenStreetMap)", "Ground frame"]
-    map_panel = overview.array_panels["Map (OpenStreetMap)"]
-    assert map_panel.layout.visible and not overview.array_panels["Ground frame"].layout.visible
+    array_page = session.pages[0]
+    array_page.refresh()
+    assert list(array_page.array_panels) == ["Map (OpenStreetMap)", "Ground frame"]
+    map_panel = array_page.array_panels["Map (OpenStreetMap)"]
+    assert map_panel.layout.visible and not array_page.array_panels["Ground frame"].layout.visible
     # a click on a telescope selects or unselects it; the telescopes have their colors
     assert session.tel_ids == [21, 22]
     map_panel._clicked("indices", [], [1])
     assert session.tel_ids == [21]
-    overview.refresh()
-    assert overview.telescopes.active == [0]
+    array_page.refresh()
+    assert array_page.telescopes.active == [0]
     assert len(map_panel._ring.data["x"]) == 1
     map_panel._clicked("indices", [], [1])
     assert session.tel_ids == [21, 22]
     colors = map_panel.source.data["color"]
     assert colors[0] != colors[1] and colors[0] == session.color(21)
     # the selection with the boxes
-    overview.telescopes.active = [1]
+    array_page.telescopes.active = [1]
     assert session.tel_ids == [22]

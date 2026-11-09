@@ -55,6 +55,7 @@ def set_options(select, options):
 
 
 def _union(lists):
+    """Names of several lists, without duplicates, in the order of first appearance"""
     result = []
     for names in lists:
         result += [name for name in names if name not in result]
@@ -98,10 +99,12 @@ class _TelescopeWaveforms:
                 self.sample.value = end
 
     def _show_message(self, text):
+        """Show a message above the displays (only sent to the browser if it changed)"""
         if self.message.text != text:
             self.message.text = text
 
     def clear(self, message):
+        """Show no event, with a message (e.g. why there is no data)"""
         self.shown = False
         self._show_message(message)
         self.camera.clear()
@@ -200,6 +203,7 @@ class WaveformPage(Page):
             self.views_container.children = [self.views[t].layout for t in tel_ids]
 
     def refresh(self):
+        """Show the displayed event of each selected telescope, the menus and the fields table"""
         session = self.session
         tel_ids = session.tel_ids
         self._set_views(tel_ids)

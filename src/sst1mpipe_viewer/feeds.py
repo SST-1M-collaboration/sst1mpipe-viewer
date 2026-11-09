@@ -121,6 +121,7 @@ class _ThreadedFeed:
                 return
 
     def run(self):
+        """Push the data (blocking; `start` runs it in a thread)"""
         raise NotImplementedError
 
     def start(self):
@@ -130,6 +131,7 @@ class _ThreadedFeed:
         return self
 
     def stop(self):
+        """Stop the feed and wait for its thread"""
         self._stop.set()
         if self._thread is not None:
             self._thread.join()
@@ -182,6 +184,7 @@ class HDF5Feed(_ThreadedFeed):
         return [by_event[key] for key in sorted(by_event)]
 
     def push_tables(self):
+        """Push all the tables of the file at once (`ViewerStore.push_table`)"""
         for (kind, _), table in self.tables.items():
             self.store.push_table(kind, table)
 
@@ -225,6 +228,7 @@ class EventSourceFeed(_ThreadedFeed):
             store.source_description = f"processing of {path}" + (f" at {self.rate:g} Hz" if self.rate > 0 else "")
 
     def run(self):
+        """Push the data (blocking; `start` runs it in a thread)"""
         from ctapipe.calib import CameraCalibrator
         from ctapipe.image import ImageProcessor
         from ctapipe.io import EventSource

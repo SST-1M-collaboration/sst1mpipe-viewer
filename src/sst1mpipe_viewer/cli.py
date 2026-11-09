@@ -28,6 +28,7 @@ def default_subarray_file():
 
 
 def parse_args(argv=None):
+    """Options of the command line (``argv``: the arguments, those of the command if None)"""
     parser = argparse.ArgumentParser(
         prog="sst1mpipe-viewer",
         description="Bokeh viewer of the SST-1M events (R0, R1, DL0, DL1, DL2) and of their accumulated statistics.",
@@ -69,6 +70,7 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """Start the viewer: read the subarray, start the feeds of the files, run the server"""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
 

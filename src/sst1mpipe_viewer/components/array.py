@@ -60,6 +60,7 @@ class ArrayPanel:
         self.layout = self.figure
 
     def _clicked(self, attr, old, new):
+        """A telescope was clicked: ``on_tel_click(tel_id)`` (the click selection is not kept)"""
         if new:
             self._on_tel_click(self.tel_ids[new[0]])
             # the selection is shown by the ring
@@ -156,6 +157,7 @@ class ArrayMapPanel:
         self.layout = self.figure
 
     def _clicked(self, attr, old, new):
+        """A telescope was clicked: ``on_tel_click(tel_id)`` (the click selection is not kept)"""
         if new:
             self._on_tel_click(self.tel_ids[new[0]])
             # the selection is shown by the ring

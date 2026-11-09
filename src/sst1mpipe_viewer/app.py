@@ -23,7 +23,7 @@ from ctapipe.coordinates import TelescopeFrame
 
 from .colors import telescope_color
 from .components import CameraPanel
-from .pages import ImageEventPage, OverviewPage, StatisticsPage, WaveformPage
+from .pages import ArrayPage, ImageEventPage, StatisticsPage, WaveformPage
 
 __all__ = ["PAGES", "StateRegistry", "UserState", "ViewerSession", "make_document"]
 
@@ -41,32 +41,48 @@ COLORMAP, FIELD_COLORMAP, COLOR_SCALE = "inferno", "viridis", "lin"
 
 #: pages: name -> (URL path, title, page factory)
 PAGES = {
-    "overview": ("/", "Array", OverviewPage),
+    "array": ("/", "Array", ArrayPage),
     "r0": ("/r0", "R0", lambda session: WaveformPage(session, "r0")),
     "r1": ("/r1", "R1", lambda session: WaveformPage(session, "r1")),
     "dl0": ("/dl0", "DL0", lambda session: WaveformPage(session, "dl0")),
     "dl1": ("/dl1", "DL1 Event", lambda session: ImageEventPage(session, "dl1")),
-    "statistics": ("/statistics", "DL1 Statistics", lambda session: StatisticsPage(session, "dl1")),
+    "dl1_statistics": ("/dl1_statistics", "DL1 Statistics", lambda session: StatisticsPage(session, "dl1")),
     "dl2": ("/dl2", "DL2 Event", lambda session: ImageEventPage(session, "dl2")),
     "dl2_statistics": ("/dl2_statistics", "DL2 Statistics", lambda session: StatisticsPage(session, "dl2")),
 }
 
 #: pages of accumulated statistics (refreshed less often: many figures)
-STATISTICS_PAGES = ("statistics", "dl2_statistics")
+STATISTICS_PAGES = ("dl1_statistics", "dl2_statistics")
 
 
 @functools.cache
 def _logo_html(height=56):
+    """HTML ``<img>`` of the SST-1M logo (white, for the dark banner), embedded in the page"""
     data = base64.b64encode((files("sst1mpipe_viewer") / "resources" / "logo.png").read_bytes()).decode()
     return f"<img src='data:image/png;base64,{data}' style='height: {height}px' alt='SST-1M'>"
 
 
 class UserState:
     """
-    Navigation state of a browser, shared by its pages: the selected telescopes, the displayed
-    event of each telescope (``follow`` the last ones, or ``event_keys[tel_id]``) and the selected
-    pixels of each telescope (``selected_pixels[tel_id]``). ``version`` is incremented at each
-    change, so that the other pages of the browser follow it.
+    Navigation state of a browser, shared by all its pages.
+
+    Attributes
+    ----------
+    tel_ids : list
+        The selected telescopes (chosen in the Array page).
+    follow : bool
+        True: the pages show the last events received (Live mode). False: they show the events
+        chosen in ``event_keys``.
+    event_keys : dict
+        ``{tel_id: (obs_id, event_id)}``, the displayed event of each telescope when not following.
+    auto_browse : bool
+        Go to the first events of the file as soon as they are loaded.
+    selected_pixels : dict
+        ``{tel_id: [pixel, ...]}``, the selected pixels of each telescope.
+    goto_error : str or None
+        Error of the last "Event id" request, shown in the status line.
+    version : int
+        Incremented at each change (`changed`): the other pages of the browser follow it.
     """
 
     def __init__(self, store):
@@ -83,6 +99,7 @@ class UserState:
         self.version = 0
 
     def changed(self):
+        """Mark a change of the state: the pages of the browser are refreshed"""
         self.version += 1
 
 
@@ -94,6 +111,7 @@ class StateRegistry:
         self._lock = threading.Lock()
 
     def get(self, client_id, store):
+        """The state of a client id (created at the first use)"""
         with self._lock:
             if client_id not in self._states:
                 self._states[client_id] = UserState(store)
@@ -102,13 +120,37 @@ class StateRegistry:
 
 class ViewerSession:
     """
-    A page of the viewer in a browser: the header (navigation between the pages, displayed events,
-    pixel selection) and the page of a data level. The page is refreshed periodically, only if
-    something changed (new data, an action of the user here or in another page of the browser),
-    all its changes being sent to the browser in a single message, and at once after an action.
+    A page of the viewer opened in a browser: the header (logo, navigation between the pages,
+    Live / Prev / Next / Event id, status line) and the page of a data level (`PAGES`).
+
+    The page is refreshed only if something changed: at once after an action of the user (here or
+    in another page of the same browser), and for new data at most every ``event_period`` seconds
+    (``statistics_period`` for the statistics pages). All the changes of a refresh are sent to the
+    browser in a single message.
+
+    Parameters
+    ----------
+    store : ViewerStore
+        The data shown.
+    doc : bokeh.document.Document or None
+        The document of the browser (None in the tests).
+    page : str
+        Name of the page in `PAGES`.
+    state : UserState or None
+        The state shared by the pages of the browser (a new one if None).
+    client_id : str or None
+        Id of the browser, in the links of the navigation.
+    refresh_period : int
+        Period of the check for changes (ms).
+    statistics_period, event_period : float
+        Minimum time between two refreshes for new data (s), of the statistics pages and of the
+        other pages: at high rates the events in between are not drawn (they are all counted in
+        the statistics).
+    colormap, field_colormap, color_scale : str
+        Colormaps of the data cameras and of the per pixel fields, ``"lin"`` or ``"log"`` scale.
     """
 
-    def __init__(self, store, doc=None, page="overview", state=None, client_id=None,
+    def __init__(self, store, doc=None, page="array", state=None, client_id=None,
                  refresh_period=REFRESH_PERIOD, statistics_period=STATISTICS_PERIOD, event_period=EVENT_PERIOD,
                  colormap=COLORMAP, field_colormap=FIELD_COLORMAP, color_scale=COLOR_SCALE):
         self.store = store
@@ -168,9 +210,11 @@ class ViewerSession:
 
     @property
     def pages(self):
+        """The page of the session, in a list (as the tests use it)"""
         return [self.page]
 
     def _navigation_html(self):
+        """Links to the pages, with the client id (the pages share the state of the browser)"""
         links = []
         for name, (path, title, _) in PAGES.items():
             style = ("background: #282828; color: white;" if name == self.page_name
@@ -193,13 +237,16 @@ class ViewerSession:
 
     @property
     def all_tel_ids(self):
+        """All the telescopes (of the subarray and of the data), selected or not"""
         return list(self.store.tel_ids)
 
     def color(self, tel_id):
+        """Color of a telescope, the same in all the pages"""
         return telescope_color(tel_id, self.all_tel_ids)
 
     @property
     def follow(self):
+        """Whether the pages follow the last events received (Live mode)"""
         return self.state.follow
 
     def selected_pixels(self, tel_id):
@@ -207,6 +254,7 @@ class ViewerSession:
         return self.state.selected_pixels.get(tel_id, [])
 
     def _changed(self):
+        """Mark a change of the state and refresh this page at once"""
         self.state.changed()
         self.request_refresh()
 
@@ -295,12 +343,14 @@ class ViewerSession:
             state.follow = False
 
     def _live_clicked(self, active):
+        """The Live button was clicked (or changed by `_update_header`)"""
         if bool(active) == self.follow:
             return  # set by _update_header
         self.state.auto_browse = False
         self.set_follow(active)
 
     def set_follow(self, follow):
+        """Follow the last events (Live mode), or browse the events from the last ones"""
         state = self.state
         state.goto_error = None
         if not follow:
@@ -352,12 +402,9 @@ class ViewerSession:
             self.doc.add_next_tick_callback(self._scheduled_tick)
 
     def _scheduled_tick(self):
+        """Refresh asked by `request_refresh`"""
         self._tick_scheduled = False
         self.tick()
-
-    @property
-    def active_page(self):
-        return self.page
 
     def _update_header(self):
         """Widgets of the header from the state (changed here or in another page of the browser)"""
@@ -383,20 +430,12 @@ class ViewerSession:
                 self.doc.unhold()
 
     def _tick(self):
-        state, store = self.state, self.store
-        if not state.tel_ids and store.tel_ids and state.version == 0:
-            state.tel_ids = list(store.tel_ids)  # telescopes known after the state was created
-        if state.auto_browse:
-            if store.has_event_data:
-                state.auto_browse = False
-            else:
-                first = {t: keys[0] for t in store.tel_ids if (keys := store.event_keys(t))}
-                if first:
-                    # browse the first events of the file
-                    state.auto_browse = False
-                    state.follow = False
-                    state.event_keys = first
-                    state.changed()
+        """Refresh of `tick` (see there), without the bokeh hold"""
+        state = self.state
+        if not state.tel_ids and self.store.tel_ids and state.version == 0:
+            state.tel_ids = list(self.store.tel_ids)  # telescopes known after the state was created
+        self._auto_browse()
+        # an action of the user in this page or in another page of the browser
         if state.version != self._state_version:
             self._state_version = state.version
             self._update_header()
@@ -404,22 +443,39 @@ class ViewerSession:
         status = self._status_text()
         if status != self.status.text:
             self.status.text = status
-        page = self.page
-        version = store.version
-        now = time.monotonic()
-        if not self._dirty:
-            if self._store_version == version:
-                return
-            if now - self._refresh_time < page.min_interval:
-                return
-        self._dirty = False
-        self._store_version = version
-        self._refresh_time = now
-        page.refresh()
+        if self._needs_refresh():
+            self._dirty = False
+            self._store_version = self.store.version
+            self._refresh_time = time.monotonic()
+            self.page.refresh()
+
+    def _auto_browse(self):
+        """A file being loaded: show its first events as soon as they are there"""
+        state, store = self.state, self.store
+        if not state.auto_browse:
+            return
+        if store.has_event_data:  # a stream, not a file: the Live mode is kept
+            state.auto_browse = False
+            return
+        first = {t: keys[0] for t in store.tel_ids if (keys := store.event_keys(t))}
+        if first:
+            state.auto_browse = False
+            state.follow = False
+            state.event_keys = first
+            state.changed()
+
+    def _needs_refresh(self):
+        """Whether the page must be refreshed: an action of the user, or new data (not too often)"""
+        if self._dirty:
+            return True
+        if self._store_version == self.store.version:
+            return False
+        return time.monotonic() - self._refresh_time >= self.page.min_interval
 
     def _status_text(self):
-        # changes only with the actions of the user: changing a Div lays out the whole page again
-        # (slow), the rates are in the table of the Array page
+        """Text of the status line: source, displayed event and selected pixels of each telescope, mode"""
+        # it changes only with the actions of the user (changing a Div lays out the whole page
+        # again, slow): the rates are in the Array page
         state = self.state
         source = self.store.source_description or "no source"
         telescopes = []
@@ -457,7 +513,7 @@ def _client_id(doc):
     return value if value.isalnum() and len(value) <= 64 else None
 
 
-def make_document(store, doc, page="overview", registry=None, **kwargs):
+def make_document(store, doc, page="array", registry=None, **kwargs):
     """Fill a bokeh document with a page of the viewer on ``store`` (bokeh application handler)"""
     client_id = _client_id(doc) or uuid.uuid4().hex[:12]
     state = registry.get(client_id, store) if registry is not None else None

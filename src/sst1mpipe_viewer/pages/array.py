@@ -1,4 +1,7 @@
-"""Overview page: welcome text, telescope array and summary of the data received"""
+"""
+Array page: welcome text, selection of the telescopes, telescope positions (map), data received
+and their rates, selection of the pixels of each telescope.
+"""
 
 from bokeh.layouts import column, row
 from bokeh.models import CheckboxGroup, ColumnDataSource, DataTable, Div, RadioButtonGroup, TableColumn
@@ -9,7 +12,7 @@ from ..store import KINDS
 from .base import LEVEL_NAMES, Page, message_div
 from .pixel_selection import PixelSelectionPanel
 
-__all__ = ["OverviewPage"]
+__all__ = ["ArrayPage"]
 
 #: colors of the data levels in the rate plots
 LEVEL_COLORS = {"r0": "#1b9e77", "r1": "#d95f02", "dl0": "#7570b3", "dl1": "#e7298a", "dl2": "#66a61e",
@@ -18,24 +21,24 @@ LEVEL_COLORS = {"r0": "#1b9e77", "r1": "#d95f02", "dl0": "#7570b3", "dl1": "#e72
 WELCOME = """
 <h2 style="margin: 0 0 6px 0">Welcome to the SST-1M event viewer</h2>
 <p style="margin: 0 0 4px 0; max-width: 520px">
-The viewer shows the events of the telescopes selected here (<b>R0</b>, <b>R1</b>, <b>DL0</b> and
-<b>DL1 Event</b> pages) and the statistics accumulated from their DL1 parameters (<b>DL1 Statistics</b>
-page), each telescope with its color.
+The viewer shows the events of the telescopes selected here (<b>R0</b>, <b>R1</b>, <b>DL0</b>,
+<b>DL1 Event</b> and <b>DL2 Event</b> pages), the statistics accumulated from their DL1 and DL2
+parameters (<b>Statistics</b> pages) and the rates of the data received, each telescope with its color.
 </p>
 <ul style="margin: 0; padding-left: 18px; max-width: 520px">
 <li><b>Live</b> follows the last event received; <b>&#9664; Prev</b> / <b>Next &#9654;</b> browse the
 events; <b>Event id</b> shows an event (an event_id, or <i>#index</i>: #0 the first event, #-1 the last).</li>
-<li>A file is processed at once: its first event is shown and the statistics are those of all its events.</li>
-<li>Click on a camera pixel to show its waveform (shift+click to select several pixels);
-each telescope has its own selection, shared by all the pages.</li>
 <li>&#9664; / &#9654; next to a telescope name browse the events of this telescope only.</li>
-<li>Select the telescopes with the boxes, or click on a telescope of the array to select or unselect it.</li>
-<li>The statistics can be reset globally or plot by plot.</li>
+<li>A file is processed at once: its first event is shown and the statistics are those of all its events.</li>
+<li>Select the telescopes with the boxes, or click on a telescope of the map.</li>
+<li>Click on a camera pixel to show its waveform (shift+click to select several pixels), or select
+groups of pixels below; each telescope has its own selection, shared by all the pages.</li>
+<li>The statistics can be reset for all the telescopes, the selected ones, or plot by plot.</li>
 </ul>
 """
 
 
-class OverviewPage(Page):
+class ArrayPage(Page):
     """The array of telescopes, the selection of the telescopes and of the pixels, the data received"""
 
     title = "Array"
@@ -88,6 +91,7 @@ class OverviewPage(Page):
         )
 
     def _build_array(self, subarray):
+        """Plots of the telescope positions (map and ground frame) of a subarray"""
         self._subarray = subarray
         if subarray is None:
             self.array_panels = {}
@@ -107,6 +111,7 @@ class OverviewPage(Page):
         view = RadioButtonGroup(labels=labels, active=0)
 
         def show(attr, old, new):
+            """Show the plot chosen with the buttons"""
             for i, panel in enumerate(panels.values()):
                 panel.layout.visible = i == new
 
@@ -115,6 +120,7 @@ class OverviewPage(Page):
         self.array_container.children = ([view] if len(labels) > 1 else []) + [p.layout for p in panels.values()]
 
     def _summary(self, counts, rates):
+        """Rows of the table of the data received (counts and rates of each telescope and data level)"""
         store = self.store
         tel_ids = store.tel_ids
         subarray = store.subarray
@@ -137,6 +143,7 @@ class OverviewPage(Page):
         return data
 
     def refresh(self):
+        """Update the table of the data, the rates, the selected telescopes and the pixel selections"""
         if self.store.subarray is not self._subarray:
             self._build_array(self.store.subarray)
         rates = self.store.rates()

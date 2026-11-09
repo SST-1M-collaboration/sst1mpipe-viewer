@@ -29,6 +29,7 @@ TRANSFORMS = {
 
 
 def _transform(name):
+    """Function of a transform name (``None``, ``"log10"``, ``"abs"``) applied to the values before filling"""
     try:
         return TRANSFORMS[name]
     except KeyError:
@@ -75,14 +76,17 @@ class Accumulator(metaclass=ABCMeta):
 
     @abstractmethod
     def _fill(self, *values):
+        """Add the values of the columns of the accumulator (implemented by each accumulator)"""
         pass
 
     def reset(self):
+        """Forget all the entries"""
         self.n_entries = 0
         self._reset()
 
     @abstractmethod
     def _reset(self):
+        """Set the accumulated state to empty (implemented by each accumulator)"""
         pass
 
     @abstractmethod
@@ -108,9 +112,11 @@ class Histogram1D(Accumulator):
 
     @property
     def columns(self):
+        """Columns needed to fill the accumulator"""
         return (self.column,)
 
     def _reset(self):
+        """Set the accumulated state to empty (implemented by each accumulator)"""
         self.counts = np.zeros(len(self.edges) - 1, dtype=np.int64)
         self.underflow = 0
         self.overflow = 0
@@ -120,6 +126,7 @@ class Histogram1D(Accumulator):
         self._n_finite = 0
 
     def _fill(self, values):
+        """Add the values of the columns of the accumulator (implemented by each accumulator)"""
         x = self._function(np.asarray(values, dtype=float).ravel())
         finite = np.isfinite(x)
         x = x[finite]
@@ -134,16 +141,19 @@ class Histogram1D(Accumulator):
 
     @property
     def mean(self):
+        """Mean of the (transformed) finite values"""
         return self._sum / self._n_finite if self._n_finite else np.nan
 
     @property
     def std(self):
+        """Standard deviation of the (transformed) finite values"""
         if not self._n_finite:
             return np.nan
         mean = self.mean
         return float(np.sqrt(max(self._sum2 / self._n_finite - mean**2, 0.0)))
 
     def snapshot(self):
+        """Copy of the accumulated state, for the display"""
         return dict(
             edges=self.edges,
             counts=self.counts.copy(),
@@ -172,12 +182,15 @@ class Histogram2D(Accumulator):
 
     @property
     def columns(self):
+        """Columns needed to fill the accumulator"""
         return (self.x, self.y)
 
     def _reset(self):
+        """Set the accumulated state to empty (implemented by each accumulator)"""
         self.counts = np.zeros((len(self.x_edges) - 1, len(self.y_edges) - 1), dtype=np.int64)
 
     def _fill(self, x, y):
+        """Add the values of the columns of the accumulator (implemented by each accumulator)"""
         x = self._fx(np.asarray(x, dtype=float).ravel())
         y = self._fy(np.asarray(y, dtype=float).ravel())
         self.n_entries += len(x)
@@ -185,6 +198,7 @@ class Histogram2D(Accumulator):
         self.counts += np.histogram2d(x[finite], y[finite], bins=(self.x_edges, self.y_edges))[0].astype(np.int64)
 
     def snapshot(self):
+        """Copy of the accumulated state, for the display"""
         return dict(x_edges=self.x_edges, y_edges=self.y_edges, counts=self.counts.copy(), n_entries=self.n_entries)
 
 
@@ -210,17 +224,21 @@ class CameraAccumulator(Accumulator):
 
     @property
     def columns(self):
+        """Columns needed to fill the accumulator"""
         return (self.column,)
 
     def accepts(self, columns):
+        """Whether the columns have the image column, with ``n_pixels`` values per row"""
         value = columns.get(self.column)
         return value is not None and np.ndim(value) == 2 and np.shape(value)[1] == self.n_pixels
 
     def _reset(self):
+        """Set the accumulated state to empty (implemented by each accumulator)"""
         self._sum = np.zeros(self.n_pixels)
         self._n = np.zeros(self.n_pixels, dtype=np.int64)
 
     def _fill(self, images):
+        """Add the values of the columns of the accumulator (implemented by each accumulator)"""
         images = np.asarray(images, dtype=float)
         finite = np.isfinite(images)
         if self.mode == "fraction":
@@ -231,10 +249,12 @@ class CameraAccumulator(Accumulator):
 
     @property
     def values(self):
+        """Accumulated value of each pixel (NaN for the pixels without entries)"""
         with np.errstate(invalid="ignore", divide="ignore"):
             return np.where(self._n > 0, self._sum / np.maximum(self._n, 1), np.nan)
 
     def snapshot(self):
+        """Copy of the accumulated state, for the display"""
         return dict(values=self.values, n_entries=self.n_entries)
 
 

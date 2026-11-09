@@ -23,6 +23,7 @@ _STEP = 0.01
 
 
 def _to_telescope_frame(x, y, camera_frame):
+    """Telescope frame (fov_lon, fov_lat in deg) of camera frame positions (x, y in m)"""
     coord = SkyCoord(x=x * u.m, y=y * u.m, frame=camera_frame).transform_to(TelescopeFrame())
     return coord.fov_lon.to_value(u.deg), coord.fov_lat.to_value(u.deg)
 

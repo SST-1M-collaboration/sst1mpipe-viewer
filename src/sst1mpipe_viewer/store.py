@@ -81,6 +81,7 @@ class _LazyRow:
         self._row = None
 
     def row(self):
+        """The row of the container (converted at the first call, the container is then dropped)"""
         if self._row is None:
             columns = to_columns(self.container, **self.keys)
             self._row = _row(columns, 0)
@@ -89,14 +90,17 @@ class _LazyRow:
 
 
 def _as_row(value):
+    """Row of a stored value (a row, or a `_LazyRow` converted now)"""
     return value.row() if isinstance(value, _LazyRow) else value
 
 
 def _row(columns, i):
+    """Row ``i`` of columns"""
     return {name: values[i] for name, values in columns.items()}
 
 
 def _select(columns, mask):
+    """Rows of columns selected by a boolean mask"""
     return {name: values[mask] for name, values in columns.items()}
 
 
@@ -193,6 +197,7 @@ class ViewerStore:
         self._clear()
 
     def _clear(self):
+        """Empty state: no event, no statistics"""
         self._events = {}  # tel_id -> OrderedDict[(obs_id, event_id) -> {kind: row}], pushed event by event
         self._tables = {}  # tel_id -> _Tables, pushed as tables
         self._latest = {}  # (tel_id, kind) -> (obs_id, event_id)
@@ -362,6 +367,7 @@ class ViewerStore:
         self._latest[(tel_id, kind)] = key
 
     def _push_lazy(self, kind, container, keys):
+        """Keep a container of an event, converted to a row only if the event is displayed"""
         now = time.monotonic()
         with self._lock:
             tel_id = keys["tel_id"]

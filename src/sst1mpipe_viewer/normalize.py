@@ -44,6 +44,7 @@ _UNIT_CACHE = {}
 
 
 def _canonical_unit(unit):
+    """Unit of the viewer for the values of a unit (same physical type), None if none"""
     try:
         return _UNIT_CACHE[unit]
     except KeyError:

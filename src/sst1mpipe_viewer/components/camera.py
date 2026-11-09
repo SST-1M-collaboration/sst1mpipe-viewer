@@ -99,6 +99,7 @@ class CameraPanel:
 
     # ----------------------------------------------------------------- setup
     def _same_camera(self, geometry):
+        """Whether ``geometry`` has the pixels of the current geometry (e.g. another SST-1M camera)"""
         current = self._geometry
         return (
             current is not None and geometry.n_pixels == current.n_pixels and geometry.pix_type == current.pix_type
@@ -143,14 +144,17 @@ class CameraPanel:
 
     @property
     def geometry(self):
+        """The camera geometry (None before `set_geometry`)"""
         return self._geometry
 
     @property
     def n_pixels(self):
+        """Number of pixels of the geometry (0 without geometry)"""
         return 0 if self._geometry is None else self._geometry.n_pixels
 
     # ---------------------------------------------------------------- update
     def set_title(self, title):
+        """Title of the camera"""
         self.figure.title.text = title
 
     def set_hover_column(self, label, values):
@@ -251,6 +255,7 @@ class CameraPanel:
         return pixel
 
     def _tapped(self, event):
+        """Click on the camera: the clicked pixel is selected (or given to ``on_pixel_tap``)"""
         pixel = self.pixel_at(event.x, event.y)
         if pixel is None:
             return
@@ -269,18 +274,22 @@ class CameraPanel:
         self._on_pixel_click(pixels)
 
     def _outlines(self, pixels):
+        """Polygons of the outlines of pixels (for the outline layers)"""
         pixels = [p for p in pixels if p < len(self._xs)]
         return dict(xs=[self._xs[p] for p in pixels], ys=[self._ys[p] for p in pixels])
 
     def _update_mask(self):
+        """Outline of the pixels of the mask"""
         mask = self._mask
         pixels = [] if mask is None or mask.shape != (self.n_pixels,) else np.flatnonzero(mask).tolist()
         self._mask_source.data = self._outlines(pixels)
 
     def _update_selected(self):
+        """Outline of the selected pixels"""
         self._selected_source.data = self._outlines(self._selected)
 
     def _update_outline(self):
+        """Outlines of the mask and of the selected pixels (after a change of geometry)"""
         self._update_mask()
         self._update_selected()
 

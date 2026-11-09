@@ -67,9 +67,11 @@ class PixelSelectionPanel:
 
     @property
     def column(self):
+        """Column of the pixel groups of the chosen grouping (e.g. ``module``)"""
         return GROUPINGS[self.grouping.value]
 
     def _geometry(self):
+        """Camera geometry of the telescope, None if it is not a DigiCam camera (no groups)"""
         geometry = self.session.geometry(self.tel_id)
         return geometry if self.groups.matches(geometry) else None
 
@@ -103,6 +105,7 @@ class PixelSelectionPanel:
         self.session.set_selected_pixels(pixels, self.tel_id)
 
     def refresh(self, force=False):
+        """Camera colored by group (redrawn when the grouping changes) and the selected pixels"""
         geometry = self._geometry()
         if geometry is None:
             self.camera.layout.visible = False

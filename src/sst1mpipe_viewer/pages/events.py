@@ -103,6 +103,7 @@ class ImageEventPage(Page):
         return events
 
     def refresh(self):
+        """Show the displayed event of each selected telescope, and the fields table"""
         session = self.session
         tel_ids = session.tel_ids
         self._set_views(tel_ids)

@@ -58,6 +58,7 @@ class TriggerView:
         self.layout = column(self.camera.layout)
 
     def tapped(self, patch, shift):
+        """A trigger patch was clicked: its 3 pixels are selected (shift: added or removed)"""
         geometry = self._pixel_geometry
         patches = patch_geometry(geometry)
         if patches is None:
@@ -66,6 +67,7 @@ class TriggerView:
                      shift)
 
     def clear(self):
+        """Show no trigger traces"""
         self.camera.clear()
         self.traces.clear()
 

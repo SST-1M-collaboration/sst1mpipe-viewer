@@ -97,7 +97,7 @@ def test_without_subarray():
 def test_tick_refreshes_only_on_change(subarray):
     store, session = make_session(subarray)
     calls = []
-    page = session.active_page
+    page = session.page
     page.refresh = lambda: calls.append(1)
     # the session was refreshed when created: nothing changed since
     session.tick()
@@ -156,9 +156,9 @@ def test_server_pages(subarray):
     store = ViewerStore(subarray)
     server = make_server(store, port=0, refresh_period=2000)
     try:
-        assert set(server._tornado.applications) == {"/", "/r0", "/r1", "/dl0", "/dl1", "/statistics", "/dl2",
+        assert set(server._tornado.applications) == {"/", "/r0", "/r1", "/dl0", "/dl1", "/dl1_statistics", "/dl2",
                                                        "/dl2_statistics"}
-        for path, title in (("/", "Array"), ("/r1", "R1"), ("/statistics", "DL1 Statistics"),
+        for path, title in (("/", "Array"), ("/r1", "R1"), ("/dl1_statistics", "DL1 Statistics"),
                             ("/dl2_statistics", "DL2 Statistics")):
             doc = Document()
             server._tornado.applications[path].application.initialize_document(doc)
@@ -175,13 +175,13 @@ def test_pages_of_a_browser_share_their_state(subarray):
     from sst1mpipe_viewer.app import StateRegistry, ViewerSession, _client_id
 
     store, browser = make_session(subarray)
-    overview, r1 = browser.sessions[0], browser.sessions[2]
-    overview.set_selected_pixels([3, 4], 1)
-    overview.step(-1)
+    array, r1 = browser.sessions[0], browser.sessions[2]
+    array.set_selected_pixels([3, 4], 1)
+    array.step(-1)
     r1.tick()
     assert r1.page.views[1].waveforms.source.data["pixel"] == ["3", "4"]
     assert not r1.live.active and r1.live.button_type == "default"
-    overview.set_tels([2])
+    array.set_tels([2])
     r1.tick()
     assert list(r1.page.views_container.children) == [r1.page.views[2].layout]
 

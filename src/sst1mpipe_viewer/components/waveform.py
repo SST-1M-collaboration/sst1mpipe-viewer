@@ -51,9 +51,6 @@ class WaveformPanel:
         self._legend_pixels = []
         self.layout = self.figure
 
-    def set_y_label(self, label):
-        self.figure.yaxis.axis_label = label
-
     def set_waveforms(self, waveforms, pixels, sample=None, baselines=None):
         """
         Show the waveforms ``(n_pixels, n_samples)`` of the ``pixels`` (their mean if there are
@@ -90,6 +87,7 @@ class WaveformPanel:
             self.sample_marker.location = sample
 
     def _set_mean(self, waveforms, pixels, sample):
+        """Show the mean waveform of the pixels (a group of pixels)"""
         samples = np.arange(waveforms.shape[-1])
         label = f"mean of {len(pixels)} {self.item_label}s"
         self.source.data = dict(xs=[samples], ys=[np.nanmean(waveforms[pixels], axis=0)], color=["black"],
@@ -102,6 +100,7 @@ class WaveformPanel:
             self.sample_marker.location = sample
 
     def _set_baselines(self, samples, values, colors):
+        """Dashed horizontal lines at the baseline of each shown pixel (``values`` None: none)"""
         if values is None:
             data = dict(xs=[], ys=[], color=[])
         else:
@@ -110,6 +109,7 @@ class WaveformPanel:
         self.baseline_source.data = data
 
     def clear(self):
+        """Show no waveform"""
         self.source.data = dict(xs=[], ys=[], color=[], pixel=[])
         self.baseline_source.data = dict(xs=[], ys=[], color=[])
         self.legend.items = []

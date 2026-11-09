@@ -31,6 +31,7 @@ def _grid(panels, n_columns):
 
 
 def _section(title):
+    """Title of a section of the page"""
     return Div(text=f"<h3 style='margin: 10px 0 0 0'>{title}</h3>")
 
 
@@ -152,6 +153,7 @@ class StatisticsPage(Page):
             panel.invalidate()
 
     def refresh(self):
+        """Show the statistics of the selected telescopes"""
         session = self.session
         tel_ids = [t for t in session.tel_ids if t in session.all_tel_ids]
         self._set_layout(tel_ids)
