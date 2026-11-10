@@ -82,7 +82,9 @@ class Browser:
         from sst1mpipe_viewer.app import PAGES, UserState, ViewerSession
 
         self.state = UserState(store)
-        self.sessions = [ViewerSession(store, Document(), page=name, state=self.state) for name in PAGES]
+        # the Selection page last, so that the data level pages keep their index in the tests
+        names = [name for name in PAGES if name != "selection"] + ["selection"]
+        self.sessions = [ViewerSession(store, Document(), page=name, state=self.state) for name in names]
         self.pages = [session.page for session in self.sessions]
 
     def __getattr__(self, name):

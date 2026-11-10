@@ -59,10 +59,11 @@ def test_groups_are_contiguous_in_the_camera_of_the_data(digicam, column):
 def test_selection_by_group(digicam):
     store = ViewerStore(digicam)
     session = Browser(store)
-    session.pages[0].refresh()
+    selection = session.pages[-1]  # the Selection page
+    selection.refresh()
     tel_id = session.tel_ids[0]
     # one pixel selection per telescope
-    panel = session.pages[0].pixel_selections[tel_id]
+    panel = selection.pixel_selections[tel_id]
     assert panel.camera.layout.visible
 
     # a click selects the module of the pixel, shift+click adds / removes a module
@@ -85,10 +86,10 @@ def test_selection_by_group(digicam):
     panel.select_ids("9")
     assert "Unknown sector ids: [9]" in panel.message.text
     assert len(session.selected_pixels(tel_id)) == 1296  # unknown ids only: selection kept
-    session.pages[0].refresh()
+    selection.refresh()
     assert "1296 pixels selected" in panel.info.text and "complete sectors: 1, 2, 3" in panel.info.text
     panel.select_ids("2")
-    session.pages[0].refresh()
+    selection.refresh()
     assert "432 pixels selected" in panel.info.text and "complete sectors: 2<" not in panel.info.text
     assert panel.info.text.endswith("complete sectors: 2")
 
@@ -96,8 +97,8 @@ def test_selection_by_group(digicam):
 def test_not_digicam(subarray):
     """Other cameras: the group selection is not available"""
     session = Browser(ViewerStore(subarray))
-    session.pages[0].refresh()
-    panel = session.pages[0].pixel_selections[1]
+    session.pages[-1].refresh()
+    panel = session.pages[-1].pixel_selections[1]
     assert not panel.camera.layout.visible and "not available" in panel.message.text
     panel.tapped(0, shift=False)
     assert session.selected_pixels(1) == []
@@ -139,12 +140,32 @@ def test_array_on_a_map(digicam):
     map_panel._clicked("indices", [], [1])
     assert session.tel_ids == [21]
     array_page.refresh()
-    assert array_page.telescopes.active == [0]
+    selection = session.pages[-1]
+    selection.refresh()
+    assert selection.telescopes.active == [0]
     assert len(map_panel._ring.data["x"]) == 1
     map_panel._clicked("indices", [], [1])
     assert session.tel_ids == [21, 22]
     colors = map_panel.source.data["color"]
     assert colors[0] != colors[1] and colors[0] == session.color(21)
-    # the selection with the boxes
-    array_page.telescopes.active = [1]
+    # the selection with the boxes of the Selection page
+    selection.telescopes.active = [1]
     assert session.tel_ids == [22]
+
+
+@needs_file
+def test_neighbouring_groups_have_different_colors(digicam):
+    """The colors of the groups of the selection camera: two touching groups never have the same color"""
+    from ctapipe.coordinates import TelescopeFrame
+
+    from sst1mpipe_viewer.pixel_groups import GROUP_PALETTE, group_color_indices
+
+    geometry = digicam.tel[21].camera.geometry.transform_to(TelescopeFrame())
+    groups = pixel_groups()
+    for grouping in ("patch", "module", "fadc_board", "sector"):
+        values = groups.values(geometry, grouping)
+        colors = group_color_indices(geometry, values)
+        assert colors.min() >= 0 and colors.max() < len(GROUP_PALETTE)
+        neighbors = geometry.neighbor_matrix_sparse.tocoo()
+        other_group = values[neighbors.row] != values[neighbors.col]
+        assert np.all(colors[neighbors.row][other_group] != colors[neighbors.col][other_group]), grouping

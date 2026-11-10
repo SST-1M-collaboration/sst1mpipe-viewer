@@ -11,7 +11,8 @@ One web page per data level, linked by the navigation bar at the top:
 
 | Path | Page | Content |
 |---|---|---|
-| `/` | **Array** | **Selection of the telescopes** (check boxes, or click on a telescope of the map), each with its color used in all the pages; telescopes on an OpenStreetMap map at their Earth location (or in the ground frame); **rates of the data levels in time** (one plot per telescope, one line per data level); **pixel selection by group**, one per telescope, of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
+| `/` | **Array** | Telescopes on an OpenStreetMap map at their Earth location (or in the ground frame), each with its color used in all the pages (a click on a telescope selects or unselects it); **rates of the data levels in time** (one plot per telescope, one line per data level) |
+| `/selection` | **Selection** | **Selection of the telescopes** (check boxes) and **of the pixels by group**, one panel per telescope, of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`); neighbouring groups have different colors |
 | `/r0`, `/r1`, `/dl0` | **R0 / R1 / DL0** | Rate of the level in time; one block per selected telescope, with its own ◀ / ▶ (events of this telescope only) and its own **sample** slider, common to the waveform camera and the trigger traces: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 12 pixels: the 12 pixels of a module are all drawn), the camera of a per-pixel field chosen in a menu (the fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels, traces of the patches of the selected pixels); the table of all the fields, one column per telescope |
 | `/dl1` | **DL1 Event** | Rate of the level in time; per selected telescope (with its own ◀ / ▶): image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse; the table of all the DL1 and trigger fields |
 | `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations (one plot per telescope), reset buttons (per plot, selected telescopes, all) |
@@ -27,7 +28,7 @@ The viewer only reads and shows the data, as defined in the ctapipe / sst1mpipe 
 cameras show the values of a field (or of a sample of the waveforms), and every row received is
 accumulated in the statistics (the selection of the events, e.g. cuts, belongs to the pipeline).
 
-The telescopes are selected in the Array page only: every page shows the selected telescopes. A
+The telescopes are selected in the Selection page (or on the map of the Array page): every page shows the selected telescopes. A
 click on a camera pixel selects it for its telescope on all the pages (shift+click adds or
 removes a pixel); each telescope has its own selection. The displayed events are chosen in the
 header:

@@ -5,7 +5,7 @@ from bokeh.layouts import column, row
 from bokeh.models import Button, Div, Select, TextInput
 
 from ..components import CameraPanel
-from ..pixel_groups import GROUPINGS, parse_ids, pixel_groups
+from ..pixel_groups import GROUP_PALETTE, GROUPINGS, group_color_indices, parse_ids, pixel_groups
 
 __all__ = ["PixelSelectionPanel", "select_group"]
 
@@ -33,11 +33,6 @@ def select_group(session, tel_id, pixels, shift):
     session.set_selected_pixels(selected, tel_id)
 
 
-def _colors(group_ids):
-    """Values spreading the colors of neighbouring groups (consecutive ids) over the colormap"""
-    return (np.asarray(group_ids, dtype=float) * 0.6180339887) % 1.0
-
-
 class PixelSelectionPanel:
     """Camera of a telescope colored by group of pixels: a click selects all the pixels of a group"""
 
@@ -53,7 +48,7 @@ class PixelSelectionPanel:
         self.add.on_click(lambda: self.select_ids(self.ids.value, add=True))
         self.info = Div(text="", width=300)
         self.message = Div(text="", width=300, styles={"color": "#666"})
-        self.camera = CameraPanel(title="Groups of pixels", width=430, height=400, cmap="viridis",
+        self.camera = CameraPanel(title="Groups of pixels", width=430, height=400, cmap=list(GROUP_PALETTE),
                                   on_pixel_tap=self.tapped, show_colorbar=False,
                                   selected_color="#e53935")
         self._state = None
@@ -120,7 +115,8 @@ class PixelSelectionPanel:
         if force or state != self._state:
             self._state = state
             self.camera.set_geometry(geometry)
-            self.camera.set_image(_colors(values))
+            # neighbouring groups have different colors
+            self.camera.set_image(group_color_indices(geometry, values))
             self.camera.set_hover_column(self.grouping.value, values)
             self.camera.set_title(f"{self.grouping.value}s of TEL {self.tel_id}"
                                   f" ({len(np.unique(values))} groups)")

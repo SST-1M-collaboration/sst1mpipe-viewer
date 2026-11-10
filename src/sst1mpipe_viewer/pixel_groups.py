@@ -12,7 +12,8 @@ from importlib.resources import files
 import astropy.units as u
 import numpy as np
 
-__all__ = ["GROUPINGS", "PixelGroups", "group_geometry", "parse_ids", "pixel_groups"]
+__all__ = ["GROUP_PALETTE", "group_color_indices", "GROUPINGS", "PixelGroups", "group_geometry", "parse_ids",
+           "pixel_groups"]
 
 #: label of each grouping -> column of the table
 GROUPINGS = {
@@ -76,6 +77,49 @@ def pixel_groups():
     with (files("sst1mpipe_viewer") / "resources" / "digicam_pixel_groups.csv").open() as f:
         rows = list(csv.DictReader(f))
     return PixelGroups({column: [int(row[column]) for row in rows] for column in GROUPINGS.values()})
+
+
+#: colors of the groups of pixels: light and distinct, without red (the outline of the selection) nor grey
+GROUP_PALETTE = ("#8dd3c7", "#ffffb3", "#bebada", "#80b1d3", "#fdb462", "#b3de69", "#fccde5", "#bc80bd")
+
+
+def group_color_indices(geometry, values, n_colors=len(GROUP_PALETTE)):
+    """
+    Color of each pixel so that neighbouring groups of pixels have different colors.
+
+    The groups are colored one after the other (graph coloring): a group takes a color which none
+    of the groups touching it has, the least used so far, so that the colors are balanced.
+
+    Parameters
+    ----------
+    geometry : ctapipe.instrument.CameraGeometry
+        The pixels (their neighbours tell which groups touch each other).
+    values : array
+        Group of each pixel.
+    n_colors : int
+        Number of colors.
+
+    Returns
+    -------
+    numpy array of int
+        Index of the color of each pixel, in ``range(n_colors)``.
+    """
+    values = np.asarray(values)
+    ids, group_index = np.unique(values, return_inverse=True)
+    # groups touching each other: those with neighbouring pixels
+    neighbors = geometry.neighbor_matrix_sparse.tocoo()
+    touching = [set() for _ in ids]
+    for a, b in zip(group_index[neighbors.row], group_index[neighbors.col]):
+        if a != b:
+            touching[a].add(int(b))
+    colors = np.full(len(ids), -1)
+    used = np.zeros(n_colors, dtype=int)
+    for group in range(len(ids)):
+        taken = {int(colors[other]) for other in touching[group] if colors[other] >= 0}
+        free = [color for color in range(n_colors) if color not in taken] or list(range(n_colors))
+        colors[group] = min(free, key=lambda color: used[color])
+        used[colors[group]] += 1
+    return colors[group_index]
 
 
 def group_geometry(geometry, grouping="patch", groups=None):

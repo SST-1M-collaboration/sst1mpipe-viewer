@@ -25,7 +25,7 @@ from .colors import telescope_color
 from .components import CameraPanel
 from .components.camera import tiling_geometry
 from .dl2 import SUBARRAY_ID
-from .pages import ArrayPage, DL2StereoPage, DL3Page, ImageEventPage, StatisticsPage, WaveformPage
+from .pages import ArrayPage, DL2StereoPage, DL3Page, ImageEventPage, SelectionPage, StatisticsPage, WaveformPage
 
 __all__ = ["PAGES", "StateRegistry", "UserState", "ViewerSession", "make_document"]
 
@@ -46,6 +46,7 @@ COLORMAP, FIELD_COLORMAP, COLOR_SCALE = "inferno", "viridis", "lin"
 #: pages: name -> (URL path, title, page factory)
 PAGES = {
     "array": ("/", "Array", ArrayPage),
+    "selection": ("/selection", "Selection", SelectionPage),
     "r0": ("/r0", "R0", lambda session: WaveformPage(session, "r0")),
     "r1": ("/r1", "R1", lambda session: WaveformPage(session, "r1")),
     "dl0": ("/dl0", "DL0", lambda session: WaveformPage(session, "dl0")),

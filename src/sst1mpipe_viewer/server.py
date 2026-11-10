@@ -12,7 +12,7 @@ __all__ = ["serve", "make_server"]
 def make_server(store, port=5006, address=None, allow_websocket_origin=None, prefix="", **session_options):
     """
     Bokeh server of the viewer on ``store`` (not started), at ``http://<address>:<port>/``: one
-    page per data level (`sst1mpipe_viewer.app.PAGES`: ``/`` for the Array page, ``/r0``, ``/r1``,
+    page per data level (`sst1mpipe_viewer.app.PAGES`: ``/`` for the Array page, ``/selection``, ``/r0``, ``/r1``,
     ``/dl0``, ``/dl1``, ``/dl1_statistics``, ``/dl2``, ``/dl2_statistics``, ``/dl2_stereo``, ``/dl3``),
     the pages of a browser sharing their state (selected telescopes, displayed events, selected pixels).
     ``session_options`` are given to the `ViewerSession` of each page (``refresh_period``, ...).
