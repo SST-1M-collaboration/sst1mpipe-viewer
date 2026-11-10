@@ -137,7 +137,7 @@ class UserState:
 
     def sample_live(self, store, now=None, force=False):
         """
-        Live mode: sample the last event received of each telescope (and of the subarray), every
+        Live mode: sample the last full event received of each telescope (and of the subarray), every
         ``live_period`` seconds. All the pages of the browser show these events, so that the user
         has the time to look at them; the events in between are not displayed (they are all in
         the statistics and the rates).
@@ -153,7 +153,9 @@ class UserState:
         if not force and not new_telescope and now - self.live_time < self.live_period:
             return False
         self.live_time = now
-        keys = {tel_id: key for tel_id in store.event_tel_ids if (key := store.latest_key(tel_id)) is not None}
+        # the last event available with its full data (the stream of the pipeline sends the waveforms
+        # and the images every second only)
+        keys = {tel_id: key for tel_id in store.event_tel_ids if (key := store.latest_full_key(tel_id)) is not None}
         if keys == self.live_keys:
             return False
         self.live_keys = keys

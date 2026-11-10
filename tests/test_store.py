@@ -261,3 +261,14 @@ def test_rates_stay_small(subarray):
         store.push_row("trigger", {"obs_id": 1, "event_id": i, "tel_id": 1, "event_type": 32})
     assert len(store._arrivals[(1, "trigger")]) <= 2
     assert store.rates()[(1, "trigger")] == 500 / 10.0
+
+
+def test_last_full_event_is_kept(subarray):
+    """The last full event (with its waveforms or image) stays readable after max_events newer events"""
+    store = ViewerStore(subarray, max_events=3)
+    store.push_row("r1", r1_row(1))
+    store.push_row("dl1", dl1_row(1))
+    for i in range(2, 10):
+        store.push_row("dl1", {k: v for k, v in dl1_row(i).items() if k not in ("image", "peak_time", "image_mask")})
+    assert (1, 1) not in store.event_keys(1) and store.latest_full_key(1) == (1, 1)
+    assert {"r1", "dl1"} <= set(store.event(1, (1, 1)))

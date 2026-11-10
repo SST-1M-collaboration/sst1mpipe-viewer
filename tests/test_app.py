@@ -404,3 +404,19 @@ def test_files_loaded_one_after_the_other(subarray):
     store.push_table("dl1", Table(rows=[dl1_row(i, tel_id=1) for i in (7, 8)]))
     session.tick()
     assert session.event_key(1) == (1, 7) and session.event_key(2) == (1, 5)
+
+
+def test_live_samples_the_last_full_event(subarray):
+    """The stream of the pipeline sends the waveforms and images every second: Live shows the last full event"""
+    store = ViewerStore(subarray)
+    session = Browser(store)
+    store.push_row("r1", r1_row(1))
+    store.push_row("dl1", dl1_row(1))
+    light = {k: v for k, v in dl1_row(2).items() if k not in ("image", "peak_time", "image_mask")}
+    store.push_row("dl1", light)  # the parameters only
+    store.push_row("dl2", dict(obs_id=1, event_id=2, tel_id=1, RF_tel_energy=1.0))  # sent with every event
+    assert store.latest_key(1) == (1, 2) and store.latest_full_key(1) == (1, 1)
+    assert session.state.sample_live(store, force=True) or session.state.live_keys[1] == (1, 1)
+    assert session.state.live_keys[1] == (1, 1)
+    refresh_all(session)
+    assert session.pages[2].views[1].shown  # its R1 is displayed
