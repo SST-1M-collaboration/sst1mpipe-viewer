@@ -14,6 +14,7 @@ import functools
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from importlib.resources import files
 
 import numpy as np
@@ -180,8 +181,11 @@ class UserState:
 class StateRegistry:
     """The `UserState` of each client id"""
 
+    #: number of states kept: the oldest used are forgotten (a browser without ``?c=<id>`` gets a new one)
+    MAX_STATES = 200
+
     def __init__(self):
-        self._states = {}
+        self._states = OrderedDict()
         self._lock = threading.Lock()
 
     def get(self, client_id, store, live_period=LIVE_PERIOD):
@@ -189,6 +193,9 @@ class StateRegistry:
         with self._lock:
             if client_id not in self._states:
                 self._states[client_id] = UserState(store, live_period)
+                while len(self._states) > self.MAX_STATES:
+                    self._states.popitem(last=False)
+            self._states.move_to_end(client_id)
             return self._states[client_id]
 
 

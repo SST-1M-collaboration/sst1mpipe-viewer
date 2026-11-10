@@ -465,6 +465,21 @@ class ViewerStore:
         self._latest_display[(tel_id, kind)] = key
         self._display_events[(tel_id, kind)] = self._events[tel_id][key]
 
+    def _is_displayable(self, tel_id, key, kind, row):
+        """
+        Whether a valid level of an event becomes the one displayed in Live mode. A DL1 is displayed
+        with its image; a DL2 is displayed on the DL1 image of its event: an event with an image is
+        not replaced by one without (the stream of the pipeline sends the images every second only).
+        """
+        if kind == "dl1":
+            return "image" in row
+        if kind == "dl2":
+            def has_image(event):
+                return "image" in _as_row(event.get("dl1", {}))
+            shown = self._display_events.get((tel_id, kind))
+            return has_image(self._events[tel_id][key]) or shown is None or not has_image(shown)
+        return True
+
     def _push_lazy(self, kind, container, keys):
         """Keep a container of an event, converted to a row only if the event is displayed"""
         now = time.monotonic()
@@ -495,7 +510,7 @@ class ViewerStore:
         with self._lock:
             merged = self._keep_event(tel_id, key, kind, row)
             if row_is_valid(kind, merged):
-                if kind != "dl1" or "image" in merged:  # a DL1 is displayed with its image
+                if self._is_displayable(tel_id, key, kind, merged):
                     self._set_display(tel_id, key, kind)
                 event_time = next((_unix_time(merged[name]) for name in TIME_COLUMNS if name in merged), None)
                 self._count_valid(tel_id, key, kind, event_time)
@@ -758,7 +773,11 @@ class ViewerStore:
             tables = self._tables.get(tel_id)
             value = tables.times.get(key) if tables is not None else None
             if value is None:
-                for row in self._events.get(tel_id, {}).get(key, {}).values():
+                event = self._events.get(tel_id, {}).get(key)
+                if event is None:  # the displayed event of a level, which left the last events
+                    event = next((self._display_events[(t, k)] for (t, k), latest in self._latest_display.items()
+                                  if t == tel_id and latest == key), {})
+                for row in event.values():
                     row = _as_row(row)
                     value = next((row[name] for name in TIME_COLUMNS if name in row), None)
                     if value is not None:

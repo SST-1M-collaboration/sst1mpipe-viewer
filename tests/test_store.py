@@ -272,3 +272,22 @@ def test_last_full_event_is_kept(subarray):
         store.push_row("dl1", {k: v for k, v in dl1_row(i).items() if k not in ("image", "peak_time", "image_mask")})
     assert (1, 1) not in store.event_keys(1) and store.latest_display_key(1, "r1") == (1, 1)
     assert {"r1", "dl1"} <= set(store.event(1, (1, 1)))
+
+
+def test_dl2_displayed_with_its_image(subarray):
+    """The DL2 event displayed in Live mode keeps an event with a DL1 image, and its time stays known"""
+    store = ViewerStore(subarray, max_events=3)
+    light = {k: v for k, v in dl1_row(2).items() if k not in ("image", "peak_time", "image_mask")}
+    dl2 = {"obs_id": 1, "tel_id": 1, "sst1mpipe_tel_energy": 1.0, "sst1mpipe_tel_is_valid": True}
+    store.push_row("dl1", {**light, "event_id": 2})
+    store.push_row("dl2", {**dl2, "event_id": 2})
+    assert store.latest_display_key(1, "dl2") == (1, 2)  # no event with an image yet
+    store.push_row("trigger", {"obs_id": 1, "event_id": 3, "tel_id": 1, "time": 1.7e9})
+    store.push_row("dl1", {**dl1_row(3), "event_id": 3})
+    store.push_row("dl2", {**dl2, "event_id": 3})
+    for i in range(4, 10):
+        store.push_row("dl1", {**light, "event_id": i})
+        store.push_row("dl2", {**dl2, "event_id": i})
+    assert store.latest_display_key(1, "dl2") == (1, 3)
+    assert "image" in store.event(1, (1, 3))["dl1"]
+    assert store.event_time(1, (1, 3)) == 1.7e9

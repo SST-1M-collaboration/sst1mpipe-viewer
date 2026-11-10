@@ -30,6 +30,7 @@ events are shifted by the duration of the replay, so that the time keeps increas
 
 """
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -47,6 +48,8 @@ from .store import TIME_COLUMNS
 
 __all__ = ["read_tables", "ReplayClock", "HDF5Feed", "EventSourceFeed", "DL3Feed", "ZMQFeed", "is_zmq_endpoint",
            "make_feed"]
+
+log = logging.getLogger("sst1mpipe_viewer.feeds")
 
 KEYS = ["obs_id", "event_id", "tel_id"]
 
@@ -477,6 +480,8 @@ class ZMQFeed(_ThreadedFeed):
 
     #: maximum waiting time for a message (s): the feed checks whether it is stopped in between
     POLL_TIMEOUT = 0.2
+    #: number of messages in error logged (the following ones are only counted in ``errors``)
+    MAX_LOGGED_ERRORS = 10
 
     def __init__(self, url, store, tel_ids=None, stereo=True):
         super().__init__()
@@ -485,8 +490,18 @@ class ZMQFeed(_ThreadedFeed):
         self.tel_ids = None if tel_ids is None else {int(t) for t in tel_ids}
         self.stereo = stereo
         self.receiver = None
+        self.errors = 0  # number of messages ignored (not readable)
         if not store.source_description:
             store.source_description = self.url
+
+    def topics(self):
+        """Topics subscribed: those of the telescopes and stereo selected (all if no selection)"""
+        from sst1mpipe.io.zmq_event_stream import STEREO_TOPIC, telescope_topic
+
+        if self.tel_ids is None:
+            # all the telescopes: no filter, unless the stereo messages are not wanted (then filtered in push)
+            return ()
+        return [telescope_topic(t) for t in sorted(self.tel_ids)] + ([STEREO_TOPIC] if self.stereo else [])
 
     def push(self, levels):
         """Push the data levels ``{level: row}`` of a message (those of the telescopes and stereo selected)"""
@@ -501,13 +516,19 @@ class ZMQFeed(_ThreadedFeed):
         """Receive and push the events until the feed is stopped (blocking)"""
         from sst1mpipe.io.zmq_event_stream import ZMQEventSubscriber
 
-        with ZMQEventSubscriber(self.url) as receiver:
+        with ZMQEventSubscriber(self.url, topics=self.topics()) as receiver:
             self.receiver = receiver
             self.store.streams[self.url] = receiver
             while not self._stop.is_set():
-                message = receiver.receive(timeout=self.POLL_TIMEOUT)
-                if message is not None:
-                    self.push(message[1])
+                # a message which cannot be read or pushed (e.g. of another format) must not stop the stream
+                try:
+                    message = receiver.receive(timeout=self.POLL_TIMEOUT)
+                    if message is not None:
+                        self.push(message[1])
+                except Exception:
+                    self.errors += 1
+                    if self.errors <= self.MAX_LOGGED_ERRORS:
+                        log.exception("Stream %s: message ignored", self.url)
 
 
 def make_feed(path, store, rate=0.0, loop=False, tel_ids=None, stereo=True, clock=None):
