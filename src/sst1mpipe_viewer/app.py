@@ -44,6 +44,8 @@ REFRESH_PERIOD = 250
 #: minimum time between two refreshes of an event page for new data (s): at high rates, the
 #: events in between are not displayed (they are all in the statistics)
 EVENT_PERIOD = 0.5
+#: data levels whose pages show the last valid event in Live mode
+DISPLAY_KINDS = ("r0", "r1", "dl0", "dl1", "dl2", "dl2_stereo")
 #: period of the sampling of the displayed events in Live mode (s), and the choices of the menu
 LIVE_PERIOD = 1.0
 LIVE_PERIODS = (1.0, 2.0, 5.0, 10.0)
@@ -103,8 +105,9 @@ class UserState:
         True: Live mode, the pages show the sampled events ``live_keys``. False: they show the
         events chosen in ``event_keys``.
     live_keys : dict
-        ``{tel_id: (obs_id, event_id)}``, in Live mode the event of each telescope shown by all the
-        pages: the last event received, sampled every ``live_period`` seconds (`sample_live`).
+        ``{tel_id: {kind: (obs_id, event_id)}}``, in Live mode the event of each telescope shown by
+        the page of each data level (``None``: the last event received), sampled every
+        ``live_period`` seconds (`sample_live`).
     live_period : float
         Period of the sampling of the Live mode (s).
     event_keys : dict
@@ -137,10 +140,11 @@ class UserState:
 
     def sample_live(self, store, now=None, force=False):
         """
-        Live mode: sample the last full event received of each telescope (and of the subarray), every
-        ``live_period`` seconds. All the pages of the browser show these events, so that the user
-        has the time to look at them; the events in between are not displayed (they are all in
-        the statistics and the rates).
+        Live mode: sample, every ``live_period`` seconds, the last event of each telescope (and of
+        the subarray) whose data level can be displayed, for each level: the R0, R1, DL0, DL1, DL2
+        pages show the last valid event of their level (`sst1mpipe_viewer.validity`; with its image
+        for the DL1), so that the user has the time to look at them. The events in between are not
+        displayed (they are all in the statistics and the rates).
 
         Returns
         -------
@@ -153,9 +157,15 @@ class UserState:
         if not force and not new_telescope and now - self.live_time < self.live_period:
             return False
         self.live_time = now
-        # the last event available with its full data (the stream of the pipeline sends the waveforms
-        # and the images every second only)
-        keys = {tel_id: key for tel_id in store.event_tel_ids if (key := store.latest_full_key(tel_id)) is not None}
+        # for each data level, the last event whose level can be displayed (valid, with its image for
+        # the DL1); None: the last event received
+        keys = {}
+        for tel_id in store.event_tel_ids:
+            latest = store.latest_key(tel_id)
+            if latest is None:
+                continue
+            keys[tel_id] = {None: latest, **{kind: key for kind in DISPLAY_KINDS
+                                            if (key := store.latest_display_key(tel_id, kind)) is not None}}
         if keys == self.live_keys:
             return False
         self.live_keys = keys
@@ -380,16 +390,19 @@ class ViewerSession:
     # ---------------------------------------------------------------- event
     def event_key(self, tel_id, kind=None):
         """
-        Key of the displayed event of a telescope: the chosen one, or in Live mode the sampled one
-        (`UserState.sample_live`), the same in all the pages (``kind`` is the data level of the
-        page: its data are shown only if they are valid)
+        Key of the displayed event of a telescope in the page of the data level ``kind``: the chosen
+        one, or in Live mode the last valid event of the level, sampled (`UserState.sample_live`)
         """
-        return self.current_key(tel_id)
+        if not self.follow:
+            return self.state.event_keys.get(tel_id)
+        keys = self.state.live_keys.get(tel_id, {})
+        return keys.get(kind) if kind in DISPLAY_KINDS else keys.get(None)
 
     def current_key(self, tel_id):
-        """Key of the current event of a telescope: the chosen one, or in Live mode the sampled one"""
-        keys = self.state.live_keys if self.follow else self.state.event_keys
-        return keys.get(tel_id)
+        """Key of the current event of a telescope: the chosen one, or in Live mode the last one received"""
+        if not self.follow:
+            return self.state.event_keys.get(tel_id)
+        return self.state.live_keys.get(tel_id, {}).get(None)
 
     def _set_live_period(self, label):
         """The period of the sampling of the Live mode was chosen in the menu"""
@@ -434,7 +447,7 @@ class ViewerSession:
         state = self.state
         if state.follow:
             state.event_keys = {t: k for t in self.store.event_tel_ids
-                                if (k := state.live_keys.get(t, self.store.latest_key(t))) is not None}
+                                if (k := state.live_keys.get(t, {}).get(None, self.store.latest_key(t))) is not None}
             state.follow = False
 
     def _live_clicked(self, active):
@@ -588,9 +601,7 @@ class ViewerSession:
             label = f"<b style='color: {self.color(tel_id)}'>TEL {tel_id}</b>"
             key = self.current_key(tel_id)
             event = f"event_id {key[1]}" if key else "no event"
-            if state.follow:
-                label += f" {event}"
-            else:
+            if not state.follow:
                 position, n_events = self.store.event_position(tel_id, key)
                 label += f" {event} ({'?' if position is None else position + 1} / {n_events})"
             pixels = self.selected_pixels(tel_id)
@@ -599,7 +610,8 @@ class ViewerSession:
             elif pixels:
                 label += f" [pixels {', '.join(str(p) for p in pixels)}]"
             telescopes.append(label)
-        mode = (f"live: the last event received, every {_period_label(state.live_period)}" if state.follow
+        mode = (f"live: the last valid event of each level, every {_period_label(state.live_period)}"
+                if state.follow
                 else "browsing")
         if state.goto_error:
             mode += f" &nbsp;<span style='color: {style.ERROR}'>{state.goto_error}</span>"

@@ -270,5 +270,5 @@ def test_last_full_event_is_kept(subarray):
     store.push_row("dl1", dl1_row(1))
     for i in range(2, 10):
         store.push_row("dl1", {k: v for k, v in dl1_row(i).items() if k not in ("image", "peak_time", "image_mask")})
-    assert (1, 1) not in store.event_keys(1) and store.latest_full_key(1) == (1, 1)
+    assert (1, 1) not in store.event_keys(1) and store.latest_display_key(1, "r1") == (1, 1)
     assert {"r1", "dl1"} <= set(store.event(1, (1, 1)))

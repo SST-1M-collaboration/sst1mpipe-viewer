@@ -17,7 +17,7 @@ from ..components import FieldsTable, RatePanel
 from ..components.histogram import add_caption, format_number
 from ..dl2 import SUBARRAY_ID, find_algorithms, generic_columns
 from ..validity import row_is_valid
-from .base import Page, event_description, message_div, missing_message, telescope_header
+from .base import Page, event_description, message_div, missing_message, set_event_label, telescope_header
 from .statistics import StatisticsPage
 
 __all__ = ["DL2StereoPage"]
@@ -40,7 +40,7 @@ class DL2StereoPage(Page):
         self.rates = RatePanel("Rate of the stereo DL2 data per minute (dashed line: displayed event)",
                                {SUBARRAY_ID: ("Subarray", color)}, markers={SUBARRAY_ID: color}, width=1000,
                                height=200)
-        self.header = telescope_header(session, SUBARRAY_ID)
+        self.header, self.event_label = telescope_header(session, SUBARRAY_ID)
         self.message = message_div(width=600)
 
         # the telescopes on the ground and the reconstructed core of the displayed event
@@ -124,6 +124,8 @@ class DL2StereoPage(Page):
         self.rates.set_markers({SUBARRAY_ID: store.event_time(SUBARRAY_ID, key)})
         rows = store.event(SUBARRAY_ID, key, (KIND, "trigger")) if key is not None else {}
         data = rows.get(KIND)
+        displayed = data is not None and row_is_valid(KIND, data)
+        set_event_label(self.event_label, key if displayed or not session.follow else None)
         if data is None or not row_is_valid(KIND, data):
             # a level which is not valid is not displayed
             self._shown = False

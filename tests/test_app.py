@@ -334,21 +334,33 @@ def test_only_valid_levels_are_displayed(subarray):
     refresh_all(session)
     r1, dl1 = session.pages[2].views[1], session.pages[4].views[1]
     assert r1.shown and dl1.shown and r1.message.text == "" and dl1.message.text == ""
-    # Live: the last event (sampled) has no R1 and its DL1 is not valid: they are not displayed
+    assert r1.event_label.text == "event_id 1" and dl1.event_label.text == "event_id 1"
+    # Live: the last event has no R1 and its DL1 is not valid: the pages keep the last valid event of
+    # their level, with its id in red
     store.push_row("dl1", dl1_row(2, intensity=np.nan))
+    store.push_row("dl1", dl1_row(3, tel_id=2))
     session.state.sample_live(store, force=True)
+    refresh_all(session)
+    assert r1.shown and dl1.shown and r1.event_label.text == "event_id 1" and dl1.event_label.text == "event_id 1"
+    assert session.current_key(1) == (1, 2)
+    # a telescope without any valid R1: nothing displayed, a message
+    r1_tel2 = session.pages[2].views[2]
+    assert not r1_tel2.shown and r1_tel2.message.text == "No valid R1 data received yet."
+    assert r1_tel2.event_label.text == ""
+    # browsing the event 2: its R1 is missing and its DL1 is not valid: nothing is displayed
+    session.go_to("2")
     refresh_all(session)
     assert not r1.shown and r1.message.text == "No valid R1 data in event 2."
     assert not dl1.shown and dl1.message.text == "No valid DL1 data in event 2."
     assert np.all(np.isnan(dl1.camera.display.datasource.data["values"]))
-    # browsing the event 1: displayed
+    assert dl1.event_label.text == "event_id 2"
     session.go_to("1")
     refresh_all(session)
     assert r1.shown and dl1.shown and dl1.message.text == ""
 
 
 def test_live_sampling(subarray):
-    """Live: the last event received is sampled every live_period, the same for all the pages"""
+    """Live: the last valid event of each level is sampled every live_period"""
     store = ViewerStore(subarray)
     session = Browser(store)
     state = session.state
@@ -356,10 +368,11 @@ def test_live_sampling(subarray):
     store.push_row("dl1", dl1_row(1))
     store.push_row("dl1", dl1_row(5, tel_id=2))
     session.tick()  # a telescope without displayed event shows its first event at once
-    assert state.live_keys == {1: (1, 1), 2: (1, 5)}
+    assert {t: keys[None] for t, keys in state.live_keys.items()} == {1: (1, 1), 2: (1, 5)}
+    assert state.live_keys[1]["dl1"] == (1, 1) and "r1" not in state.live_keys[1]
     store.push_row("dl1", dl1_row(2))
     session.tick()  # before the end of the period: the displayed event stays
-    assert session.event_key(1, "dl1") == (1, 1) and session.event_key(1, "r1") == (1, 1)
+    assert session.event_key(1, "dl1") == (1, 1) and session.event_key(1, "r1") is None
     version = state.version
     assert state.sample_live(store, now=state.live_time + 1.0)  # one period later: the last event
     assert session.event_key(1, "dl1") == (1, 2) and state.version > version
@@ -369,7 +382,7 @@ def test_live_sampling(subarray):
     assert state.live_period == 5.0 and session.sessions[3].state.live_period == 5.0
     store.push_row("dl1", dl1_row(3))
     assert not state.sample_live(store, now=state.live_time + 2.0)
-    assert state.sample_live(store, now=state.live_time + 5.0) and state.live_keys[1] == (1, 3)
+    assert state.sample_live(store, now=state.live_time + 5.0) and state.live_keys[1]["dl1"] == (1, 3)
     # leaving the Live mode keeps the event shown
     session.set_follow(False)
     assert session.event_key(1) == (1, 3)
@@ -413,10 +426,12 @@ def test_live_samples_the_last_full_event(subarray):
     store.push_row("r1", r1_row(1))
     store.push_row("dl1", dl1_row(1))
     light = {k: v for k, v in dl1_row(2).items() if k not in ("image", "peak_time", "image_mask")}
-    store.push_row("dl1", light)  # the parameters only
-    store.push_row("dl2", dict(obs_id=1, event_id=2, tel_id=1, RF_tel_energy=1.0))  # sent with every event
-    assert store.latest_key(1) == (1, 2) and store.latest_full_key(1) == (1, 1)
-    assert session.state.sample_live(store, force=True) or session.state.live_keys[1] == (1, 1)
-    assert session.state.live_keys[1] == (1, 1)
+    store.push_row("dl1", light)  # the parameters only (valid, but no image to display)
+    store.push_row("dl2", dict(obs_id=1, event_id=2, tel_id=1, RF_tel_energy=1.0))
+    assert store.latest_key(1) == (1, 2)
+    assert store.latest_display_key(1, "r1") == (1, 1) and store.latest_display_key(1, "dl1") == (1, 1)
+    assert store.latest_display_key(1, "dl2") == (1, 2)
+    session.state.sample_live(store, force=True)
+    assert session.event_key(1, "r1") == (1, 1) and session.event_key(1, "dl1") == (1, 1)
     refresh_all(session)
-    assert session.pages[2].views[1].shown  # its R1 is displayed
+    assert session.pages[2].views[1].shown and session.pages[4].views[1].shown

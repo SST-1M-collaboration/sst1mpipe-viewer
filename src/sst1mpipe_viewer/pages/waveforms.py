@@ -6,7 +6,7 @@ from bokeh.models import Div, Select, Slider
 
 from ..components import FieldsTable, WaveformPanel
 from ..components.waveform import waveform_2d
-from .base import LevelRates, Page, event_description, message_div, missing_message, telescope_header
+from .base import LevelRates, Page, event_description, message_div, missing_message, set_event_label, telescope_header
 from .trigger import TRACE_FIELDS, TriggerView, trace_fields
 
 __all__ = ["WaveformPage", "field_shapes", "sample_image"]
@@ -68,7 +68,7 @@ class _TelescopeWaveforms:
     def __init__(self, page, tel_id):
         session = page.session
         self.session, self.page, self.tel_id = session, page, tel_id
-        self.header = telescope_header(session, tel_id)
+        self.header, self.event_label = telescope_header(session, tel_id)
         self.message = message_div()
         # the sample of the waveforms and of the trigger traces shown in the cameras (per telescope)
         self.sample = Slider(title="Sample", start=0, end=1, value=0, step=1, width=400)
@@ -236,6 +236,8 @@ class WaveformPage(Page):
         table = {}
         for tel_id, (key, rows, data, geometry, shapes) in events.items():
             view = self.views[tel_id]
+            # the id of the displayed event, in red (the pages can show different events)
+            set_event_label(view.event_label, key if tel_id in shown or not session.follow else None)
             if tel_id in shown:
                 view.update(key, rows, data, geometry)
                 view.show_message(None)

@@ -229,10 +229,11 @@ class ViewerStore:
         self._latest = {}  # (tel_id, kind) -> (obs_id, event_id)
         self._counts = Counter()  # (tel_id, kind) -> number of rows received
         self._arrivals = {}  # (tel_id, kind) -> deque of [time, n rows] of the last RATE_WINDOW s
-        # tel_id -> (obs_id, event_id) and rows of the last full event (waveforms or images): kept even
-        # when it leaves the last max_events events (the full events of a stream come every second)
-        self._latest_full = {}
-        self._full_events = {}
+        # (tel_id, kind) -> (obs_id, event_id) and rows of the last event whose level can be displayed
+        # (valid, with its image for the DL1): kept even when it leaves the last max_events events
+        # (the stream of the pipeline sends the waveforms and the images every second only)
+        self._latest_display = {}
+        self._display_events = {}
         self._latest_valid = {}  # (tel_id, kind) -> (obs_id, event_id) of the last event with a valid level
         self._history = {}  # (tel_id, kind) -> {minute (event time // RATE_BIN): n valid events}
         self._history_start = {}  # (tel_id, kind) -> time of the first valid event (unix s)
@@ -457,12 +458,12 @@ class ViewerStore:
             row = {**_as_row(event[kind]), **_as_row(row)}
         event[kind] = row
         self._latest[(tel_id, kind)] = key
-        if kind in LAZY_KINDS or kind == "dl2_stereo" or (kind == "dl1" and "image" in row):
-            # a full event: with its waveforms or image (the stream of the pipeline sends them only
-            # every second, the other events with their parameters only), or a stereo event
-            self._latest_full[tel_id] = key
-            self._full_events[tel_id] = event
         return row
+
+    def _set_display(self, tel_id, key, kind):
+        """The level ``kind`` of the event ``key`` can be displayed: it is the last one of its level"""
+        self._latest_display[(tel_id, kind)] = key
+        self._display_events[(tel_id, kind)] = self._events[tel_id][key]
 
     def _push_lazy(self, kind, container, keys):
         """Keep a container of an event, converted to a row only if the event is displayed"""
@@ -472,6 +473,7 @@ class ViewerStore:
             key = (keys["obs_id"], keys["event_id"])
             self._keep_event(tel_id, key, kind, _LazyRow(container, keys))
             if container_is_valid(kind, container):
+                self._set_display(tel_id, key, kind)
                 self._count_valid(tel_id, key, kind, _unix_time(getattr(container, "event_time", None)))
             self._count(tel_id, kind, 1, now)
             self.version += 1
@@ -493,6 +495,8 @@ class ViewerStore:
         with self._lock:
             merged = self._keep_event(tel_id, key, kind, row)
             if row_is_valid(kind, merged):
+                if kind != "dl1" or "image" in merged:  # a DL1 is displayed with its image
+                    self._set_display(tel_id, key, kind)
                 event_time = next((_unix_time(merged[name]) for name in TIME_COLUMNS if name in merged), None)
                 self._count_valid(tel_id, key, kind, event_time)
             self._count(tel_id, kind, 1, now)
@@ -608,14 +612,14 @@ class ViewerStore:
             tables = self._tables.get(tel_id)
             return tables.keys[-1] if tables and tables.keys else None
 
-    def latest_full_key(self, tel_id):
+    def latest_display_key(self, tel_id, kind):
         """
-        (obs_id, event_id) of the last full event of a telescope pushed event by event: with its
-        waveforms or its DL1 image (the stream of the pipeline sends them every second only; the
-        other events have their parameters only). The last event if none is full.
+        (obs_id, event_id) of the last event of a telescope whose level ``kind`` can be displayed:
+        valid (`sst1mpipe_viewer.validity`), with its image for the DL1 (the stream of the pipeline
+        sends the waveforms and the images every second only), None if none
         """
         with self._lock:
-            return self._latest_full.get(tel_id) or self.latest_key(tel_id)
+            return self._latest_display.get((tel_id, kind)) or self._latest_valid.get((tel_id, kind))
 
     def latest_valid_key(self, tel_id, kind):
         """
@@ -671,8 +675,9 @@ class ViewerStore:
             result = tables.event(key, kinds) if tables is not None and key in tables.positions else {}
             pushed = self._events.get(tel_id, {}).get(key)
             if pushed is None:
-                # the last full event, which may have left the last max_events events
-                pushed = self._full_events.get(tel_id, {}) if self._latest_full.get(tel_id) == key else {}
+                # the last event displayable of a level, which may have left the last max_events events
+                pushed = next((self._display_events[(t, k)] for (t, k), latest in self._latest_display.items()
+                               if t == tel_id and latest == key), {})
             for kind, row in pushed.items():
                 if kinds is None or kind in kinds:
                     result[kind] = {**result.get(kind, {}), **_as_row(row)}

@@ -13,7 +13,7 @@ from bokeh.models import CheckboxGroup, Div, Select
 from ..components import FieldsTable
 from ..frames import source_telescope_frame
 from ..validity import row_is_valid
-from .base import LevelRates, Page, event_description, message_div, missing_message, telescope_header
+from .base import LevelRates, Page, event_description, message_div, missing_message, set_event_label, telescope_header
 from .waveforms import field_shapes, set_options
 
 __all__ = ["ImageEventPage"]
@@ -26,7 +26,7 @@ class _TelescopeImage:
     """Camera of the event of a telescope in an image page"""
 
     def __init__(self, session, tel_id):
-        self.header = telescope_header(session, tel_id)
+        self.header, self.event_label = telescope_header(session, tel_id)
         self.message = message_div(width=330, height=48)  # the cameras of the telescopes are side by side
         self.camera = session.camera_panel(geometry=session.geometry(tel_id), title="Image",
                                            on_pixel_click=session.pixel_click(tel_id), width=460, height=430)
@@ -135,6 +135,9 @@ class ImageEventPage(Page):
         """Show the event of a telescope in its camera"""
         session = self.session
         camera = view.camera
+        # the id of the displayed event, in red (the pages can show different events)
+        displayed = data is not None and row_is_valid(self.kind, data)
+        set_event_label(view.event_label, key if displayed or not session.follow else None)
         if geometry is None:
             view.shown = False
             view.show_message("No camera geometry (no subarray).")
