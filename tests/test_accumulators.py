@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from sst1mpipe_viewer.accumulators import CameraAccumulator, Histogram1D, Histogram2D, StatisticsSet, make_bins
 from sst1mpipe_viewer.config import build_statistics, load_statistics_config
@@ -61,4 +62,20 @@ def test_default_configuration():
 
 def test_default_dl2_configuration():
     statistics = build_statistics(load_statistics_config(kind="dl2"), n_pixels=1296)
-    assert {"reco_energy", "gammaness", "reco_alt", "reco_az"} <= {a.name for a in statistics}
+    assert {"energy", "prediction", "alt", "az", "impact_distance"} <= {a.name for a in statistics}
+    stereo = build_statistics(load_statistics_config(kind="dl2_stereo"), n_pixels=0)
+    assert {"energy", "h_max", "core"} <= {a.name for a in stereo}
+
+
+def test_log_bins():
+    """log_x: logarithmic bins on the values (not a transform of the values)"""
+    edges = make_bins(3, (1, 1000), log=True)
+    assert np.allclose(edges, [1, 10, 100, 1000])
+    with pytest.raises(ValueError):
+        make_bins(3, (0, 10), log=True)
+    statistics = build_statistics({"hist1d": [{"column": "e", "log_x": True, "range": [1, 1000], "bins": 3}],
+                                   "hist2d": [{"x": "e", "x_log": True, "x_range": [1, 100], "x_bins": 2,
+                                               "y": "g", "y_range": [0, 1], "y_bins": 1}]}, n_pixels=0)
+    statistics.fill({"e": np.array([5.0, 50.0, 500.0]), "g": np.array([0.5, 0.5, 0.5])})
+    assert statistics["e"].counts.tolist() == [1, 1, 1] and np.isclose(statistics["e"].mean, 185.0)
+    assert statistics["g_vs_e"].counts[:, 0].tolist() == [1, 1]

@@ -46,7 +46,15 @@ from ctapipe.instrument import SubarrayDescription
 
 from .accumulators import CameraAccumulator
 from .config import STATISTICS_KINDS, build_statistics, load_statistics_config
-from .dl2 import add_dl2_aliases
+from .dl2 import (
+    SUBARRAY_ID,
+    add_sst1mpipe_algorithm,
+    combination_key,
+    combinations,
+    container_row,
+    find_algorithms,
+    generic_columns,
+)
 from .dl3 import DL3Data
 from .frames import CAMERA_FRAME_PREFIX, add_telescope_frame_parameters
 from .normalize import KEY_COLUMNS, n_rows, to_columns
@@ -55,7 +63,11 @@ from .rates import RATE_BIN, binned_rates, live_rates
 __all__ = ["KINDS", "ViewerStore"]
 
 #: kinds of data accepted by the store
-KINDS = ("r0", "r1", "dl0", "dl1", "dl2", "trigger")
+KINDS = ("r0", "r1", "dl0", "dl1", "dl2", "dl2_stereo", "trigger")
+#: kinds of data of a telescope (the stereo DL2 are those of the subarray)
+TELESCOPE_KINDS = tuple(kind for kind in KINDS if kind != "dl2_stereo")
+#: DL2 kinds: their statistics are accumulated per combination of algorithms (`sst1mpipe_viewer.dl2`)
+DL2_KINDS = ("dl2", "dl2_stereo")
 
 #: time window (s) of the rates of received rows
 RATE_WINDOW = 10.0
@@ -214,7 +226,9 @@ class ViewerStore:
         self._history = {}  # (tel_id, kind) -> {minute (unix time // RATE_BIN): n rows received}
         self._history_start = {}  # (tel_id, kind) -> time of arrival of the first row (unix s)
         self._table_history = {}  # (tel_id, kind) -> (tables version, (times, rates, errors)), cache
-        self._statistics = {}  # (kind, tel_id) -> StatisticsSet
+        # (kind, tel_id, combination of DL2 algorithms or None) -> StatisticsSet
+        self._statistics = {}
+        self._algorithms = {}  # (kind, tel_id) -> {group: [algorithm, ...]}, the DL2 algorithms seen
         self._pending = {}  # (kind, tel_id) -> list of columns not yet in the statistics
         self._n_pending = 0
         self._needed_columns = {}  # kind -> columns used by the statistics
@@ -226,10 +240,10 @@ class ViewerStore:
         with self._lock:
             self.subarray = subarray
             # statistics created without the camera geometry have no camera maps: rebuild them
-            for (kind, tel_id), statistics in list(self._statistics.items()):
+            for key, statistics in list(self._statistics.items()):
                 cameras = [a for a in statistics if isinstance(a, CameraAccumulator)]
-                if any(a.n_pixels == 0 for a in cameras) and tel_id in subarray.tel:
-                    del self._statistics[(kind, tel_id)]
+                if any(a.n_pixels == 0 for a in cameras) and key[1] in subarray.tel:
+                    del self._statistics[key]
             self.version += 1
 
     def add_telescopes(self, subarray):
@@ -271,22 +285,29 @@ class ViewerStore:
         self._push_event_rows(kind, to_columns(container, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
 
     def push_row(self, kind, row, *, obs_id=None, event_id=None, tel_id=None):
-        """Push a row (a mapping ``{column: value}`` or an astropy table row)"""
+        """
+        Push a row (a mapping ``{column: value}`` or an astropy table row). The stereo DL2 rows
+        (``"dl2_stereo"``) need no ``tel_id``.
+        """
+        tel_id = SUBARRAY_ID if kind == "dl2_stereo" else tel_id
         self._push_event_rows(kind, to_columns(row, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
 
     def push_event(self, event):
         """
         Push the data of a ctapipe ``ArrayEventContainer``: the R0, R1, DL0, DL1, DL2 and
-        trigger containers of its telescopes.
+        trigger containers of its telescopes, and its stereo DL2.
         """
         keys = dict(obs_id=event.index.obs_id, event_id=event.index.event_id)
         for kind in ("r0", "r1", "dl0", "dl1"):
             for tel_id, container in getattr(event, kind).tel.items():
                 self.push_container(kind, container, tel_id=tel_id, **keys)
         for tel_id, reconstructed in event.dl2.tel.items():
-            row = _telescope_dl2_row(reconstructed)
+            row = container_row(reconstructed)
             if row:
                 self.push_row("dl2", row, tel_id=tel_id, **keys)
+        row = container_row(event.dl2.stereo, stereo=True)
+        if row:
+            self.push_row("dl2_stereo", row, **keys)
         for tel_id, container in event.trigger.tel.items():
             columns = to_columns(container, tel_id=tel_id, **keys)
             columns.update(to_columns({"event_type": event.trigger.event_type}))
@@ -296,7 +317,9 @@ class ViewerStore:
         """
         Push the rows of a table (an astropy table): all of them are processed at once, the
         DL1 and DL2 rows fill the statistics and every event of the table can be displayed.
+        The stereo DL2 tables (``"dl2_stereo"``) need no ``tel_id``.
         """
+        tel_id = SUBARRAY_ID if kind == "dl2_stereo" else tel_id
         columns = self._check(kind, to_columns(table, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
         if columns is None:
             return
@@ -305,7 +328,7 @@ class ViewerStore:
             for tel_id, tel_columns in self._split_telescopes(columns):
                 if kind in STATISTICS_KINDS:
                     tel_columns = self._telescope_frame(tel_id, tel_columns)
-                    self._tel_statistics(kind, tel_id, tel_columns).fill(tel_columns)
+                    self._fill_statistics(kind, tel_id, tel_columns)
                 self._tables.setdefault(tel_id, _Tables()).add(kind, tel_columns)
                 if not self._events.get(tel_id):
                     # the events pushed one by one (a stream) stay the latest ones
@@ -322,7 +345,7 @@ class ViewerStore:
         if missing:
             raise ValueError(f"Missing columns {missing} in the {kind} data (or give them as keywords)")
         if kind == "dl2":
-            columns = add_dl2_aliases(columns)
+            columns = add_sst1mpipe_algorithm(columns)
         return columns if n_rows(columns) else None
 
     @staticmethod
@@ -419,10 +442,14 @@ class ViewerStore:
 
     def _buffer(self, kind, tel_id, columns):
         """Keep rows pushed event by event for the statistics (only their columns used by the statistics)"""
-        needed = self._needed(kind)
-        # the parameters in the camera frame are kept to be converted to the telescope frame
-        kept = {name: values for name, values in columns.items()
-                if name in needed or name.startswith(CAMERA_FRAME_PREFIX)}
+        if kind in DL2_KINDS:
+            # any algorithm can be plotted: all the columns with one value per row
+            kept = {name: values for name, values in columns.items() if np.ndim(values) == 1}
+        else:
+            needed = self._needed(kind)
+            # the parameters in the camera frame are kept to be converted to the telescope frame
+            kept = {name: values for name, values in columns.items()
+                    if name in needed or name.startswith(CAMERA_FRAME_PREFIX)}
         self._pending.setdefault((kind, tel_id), []).append(kept)
         self._n_pending += n_rows(columns)
 
@@ -440,7 +467,7 @@ class ViewerStore:
             for names, group in groups.items():
                 columns = {name: np.concatenate([chunk[name] for chunk in group]) for name in names}
                 columns = self._telescope_frame(key[1], columns)
-                self._tel_statistics(*key, columns).fill(columns)
+                self._fill_statistics(*key, columns)
 
     def _telescope_frame(self, tel_id, columns):
         """Telescope frame parameters from the camera frame parameters of sst1mpipe, if needed"""
@@ -449,9 +476,33 @@ class ViewerStore:
             return columns
         return add_telescope_frame_parameters(columns, subarray.tel[tel_id].camera.geometry.frame)
 
-    def _tel_statistics(self, kind, tel_id, columns=None):
-        """The statistics of a data level of a telescope (created at the first use)"""
-        statistics = self._statistics.get((kind, tel_id))
+    def _fill_statistics(self, kind, tel_id, columns):
+        """Add rows to the statistics of a data level of a telescope"""
+        if kind not in DL2_KINDS:
+            self._tel_statistics(kind, tel_id, columns).fill(columns)
+            return
+        # DL2: one set of statistics per combination of the algorithms received so far, filled with
+        # the generic columns of the algorithms of these rows (rows without the energy still fill
+        # the histograms of the geometry, ...)
+        algorithms = find_algorithms(columns, stereo=kind == "dl2_stereo")
+        known = self._algorithms.setdefault((kind, tel_id), {})
+        for group, names in algorithms.items():
+            known[group] = sorted(set(known.get(group, [])) | set(names))
+        for combination in combinations(known):
+            generic = generic_columns(columns, algorithms, combination)
+            # only the fields with one number per row are accumulated (not the lists of telescopes)
+            generic = {name: values for name, values in generic.items()
+                       if np.ndim(values) == 1 and np.asarray(values).dtype != object}
+            if generic:
+                self._tel_statistics(kind, tel_id, combination=combination_key(combination)).fill(generic)
+
+    def _tel_statistics(self, kind, tel_id, columns=None, combination=None):
+        """
+        The statistics of a data level of a telescope (created at the first use); for the DL2, of a
+        combination of algorithms (`sst1mpipe_viewer.dl2.combination_key`)
+        """
+        key = (kind, tel_id, combination)
+        statistics = self._statistics.get(key)
         if statistics is None:
             n_pixels = 0
             if self.subarray is not None and tel_id in self.subarray.tel:
@@ -459,7 +510,7 @@ class ViewerStore:
             elif columns is not None and "image" in columns:
                 n_pixels = np.shape(columns["image"])[1]
             statistics = build_statistics(self.statistics_configs[kind], n_pixels)
-            self._statistics[(kind, tel_id)] = statistics
+            self._statistics[key] = statistics
         return statistics
 
     # ----------------------------------------------------------------- output
@@ -467,10 +518,17 @@ class ViewerStore:
     def tel_ids(self):
         """Telescopes of the subarray and of the data received"""
         with self._lock:
-            ids = set(self._events) | set(self._tables)
+            ids = (set(self._events) | set(self._tables)) - {SUBARRAY_ID}
             if self.subarray is not None:
                 ids |= set(self.subarray.tel_ids)
             return sorted(int(i) for i in ids)
+
+    @property
+    def event_tel_ids(self):
+        """The telescopes, and `SUBARRAY_ID` if stereo events were received: all that have events to browse"""
+        with self._lock:
+            stereo = SUBARRAY_ID in self._events or SUBARRAY_ID in self._tables
+        return self.tel_ids + ([SUBARRAY_ID] if stereo else [])
 
     @property
     def has_event_data(self):
@@ -646,11 +704,38 @@ class ViewerStore:
             return None
         return value if np.isfinite(value) else None
 
-    def statistics(self, tel_id, kind="dl1"):
-        """Snapshot of the statistics of a data level of a telescope (see `StatisticsSet.snapshot`)"""
+    def algorithms(self, tel_id, kind="dl2"):
+        """
+        The DL2 algorithms received for a telescope (`SUBARRAY_ID` for the stereo DL2):
+        ``{group: [algorithm, ...]}``, see `sst1mpipe_viewer.dl2`
+        """
         with self._lock:
             self._flush(tel_id, kind)
-            return self._tel_statistics(kind, tel_id).snapshot()
+            return {group: list(names) for group, names in self._algorithms.get((kind, tel_id), {}).items()}
+
+    def statistics(self, tel_id, kind="dl1", algorithms=None):
+        """
+        Snapshot of the statistics of a data level of a telescope (see `StatisticsSet.snapshot`).
+
+        Parameters
+        ----------
+        tel_id : int
+            The telescope (`SUBARRAY_ID` for the stereo DL2).
+        kind : str
+            ``"dl1"``, ``"dl2"`` or ``"dl2_stereo"``.
+        algorithms : dict or None
+            For the DL2, the algorithm of each group ``{group: algorithm}``; the first algorithm
+            (in alphabetical order) for the groups not given.
+        """
+        with self._lock:
+            self._flush(tel_id, kind)
+            combination = None
+            if kind in DL2_KINDS:
+                known = self._algorithms.get((kind, tel_id), {})
+                chosen = {group: (algorithms or {}).get(group) for group in known}
+                combination = combination_key({group: name if name in known[group] else known[group][0]
+                                               for group, name in chosen.items()})
+            return self._tel_statistics(kind, tel_id, combination=combination).snapshot()
 
     # ---------------------------------------------------------------- control
     def reset_statistics(self, tel_id=None, name=None, kind="dl1"):
@@ -658,9 +743,9 @@ class ViewerStore:
         with self._lock:
             # the buffered rows were received before the reset
             self._flush(tel_id, kind)
-            tel_ids = [t for k, t in self._statistics if k == kind] if tel_id is None else [tel_id]
-            for tel in tel_ids:
-                self._tel_statistics(kind, tel).reset(name)
+            for key, statistics in self._statistics.items():
+                if key[0] == kind and tel_id in (None, key[1]):
+                    statistics.reset(name)
             self.version += 1
 
     def clear(self):
@@ -670,16 +755,3 @@ class ViewerStore:
             self.version += 1
         self.dl3.reset()
 
-
-def _telescope_dl2_row(reconstructed):
-    """
-    Row of a ctapipe ``TelescopeReconstructedContainer`` (energy, particle type and geometry of
-    each algorithm), with the column names of the ctapipe tables: ``<algorithm>_tel_<field>``
-    """
-    row = {}
-    for group in ("energy", "particle_type", "geometry"):
-        for algorithm, container in reconstructed[group].items():
-            for field, value in container.items():
-                if field != "telescopes" and not isinstance(value, (dict, list)):
-                    row[f"{algorithm}_tel_{field}"] = value
-    return row

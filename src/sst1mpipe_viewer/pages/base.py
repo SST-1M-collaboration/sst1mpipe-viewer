@@ -10,7 +10,8 @@ from ..components import RatePanel
 __all__ = ["Page", "LevelRates", "message_div", "event_description", "telescope_header"]
 
 #: names of the data levels in the titles
-LEVEL_NAMES = {"r0": "R0", "r1": "R1", "dl0": "DL0", "dl1": "DL1", "dl2": "DL2", "trigger": "trigger"}
+LEVEL_NAMES = {"r0": "R0", "r1": "R1", "dl0": "DL0", "dl1": "DL1", "dl2": "DL2", "dl2_stereo": "DL2 stereo",
+               "trigger": "trigger"}
 
 
 def message_div(text="", width=900):
@@ -106,7 +107,8 @@ class LevelRates:
 
 def telescope_header(session, tel_id):
     """Header of the block of a telescope in a page: its name in its color, its own Prev / Next"""
-    title = Div(text=f"<h3 style='margin: 4px 0 0 0; color: {session.color(tel_id)}'>TEL {tel_id}</h3>", width=70)
+    title = Div(text=f"<h3 style='margin: 4px 0 0 0; color: {session.color(tel_id)}'>"
+                     f"{session.tel_label(tel_id)}</h3>", width=85)
     prev_button = Button(label="◀", width=36, height=28)
     next_button = Button(label="▶", width=36, height=28)
     prev_button.on_click(lambda: session.step(-1, [tel_id]))

@@ -50,6 +50,9 @@ def parse_args(argv=None):
                         help="YAML configuration of the accumulated DL1 statistics (default: the one of the package)")
     parser.add_argument("--dl2-statistics-config", type=Path, default=None,
                         help="YAML configuration of the accumulated DL2 statistics (default: the one of the package)")
+    parser.add_argument("--dl2-stereo-statistics-config", type=Path, default=None,
+                        help="YAML configuration of the accumulated stereo DL2 statistics (default: the one of the"
+                        " package)")
     parser.add_argument("--dl3-statistics-config", type=Path, default=None,
                         help="YAML configuration of the accumulated DL3 statistics (default: the one of the package)")
     parser.add_argument("--replay-rate", type=float, default=0.0, metavar="HZ",
@@ -87,6 +90,7 @@ def main(argv=None):
 
     configs = {"dl1": load_statistics_config(args.statistics_config, "dl1"),
                "dl2": load_statistics_config(args.dl2_statistics_config, "dl2"),
+               "dl2_stereo": load_statistics_config(args.dl2_stereo_statistics_config, "dl2_stereo"),
                "dl3": load_statistics_config(args.dl3_statistics_config, "dl3")}
     store = ViewerStore(subarray=subarray, statistics_configs=configs)
     if args.files:

@@ -20,9 +20,9 @@ __all__ = ["ImageEventPage"]
 #: indices of the display options (check boxes)
 SHOW_MASK, SHOW_ELLIPSE, ONLY_RECONSTRUCTED = 0, 1, 2
 
-#: column which is finite for the events whose parameters were reconstructed: in Live mode, the
-#: page can show only these events (e.g. not the events without any pixel after the cleaning)
-RECONSTRUCTED_COLUMNS = {"dl1": "hillas_intensity", "dl2": "reco_energy"}
+#: DL1 column which is finite for the events with parameters: in Live mode, the DL1 page can show
+#: only these events (not the events without any pixel after the cleaning)
+RECONSTRUCTED_COLUMN = "hillas_intensity"
 
 
 class _TelescopeImage:
@@ -52,17 +52,19 @@ class ImageEventPage(Page):
         The page of the browser.
     kind : str
         ``"dl1"`` or ``"dl2"``. The camera shows the DL1 image of the event in both cases; the
-        DL2 page adds the reconstructed source position (a star) and lists the DL2 fields.
+        DL2 page lists all the DL2 fields of the telescope (every algorithm: energy, classification,
+        geometry, impact, disp, with their uncertainties and validity) and, for the DL2 of
+        sst1mpipe, shows the reconstructed source position (a star).
     """
 
     def __init__(self, session, kind="dl1"):
         super().__init__(session)
         self.kind = kind
         self.title = f"{kind.upper()} Event"
-        reconstructed = ("only the events surviving the cleaning" if kind == "dl1"
-                         else "only the events with a reconstructed energy")
-        self.options = CheckboxGroup(labels=["Cleaning mask", "Hillas ellipse", f"Live: {reconstructed}"],
-                                     active=[SHOW_MASK, SHOW_ELLIPSE, ONLY_RECONSTRUCTED], inline=True)
+        labels = ["Cleaning mask", "Hillas ellipse"]
+        if kind == "dl1":
+            labels.append("Live: only the events surviving the cleaning")
+        self.options = CheckboxGroup(labels=labels, active=list(range(len(labels))), inline=True)
         self.options.on_change("active", lambda attr, old, new: self.refresh())
         self.pixel_field = Select(title="Camera", value="image", options=["image", "peak_time", "image_mask"],
                                   width=200)
@@ -94,7 +96,7 @@ class ImageEventPage(Page):
         """``{tel_id: (key, rows, geometry)}``: the displayed event of each telescope"""
         session = self.session
         only_reconstructed = ONLY_RECONSTRUCTED in self.options.active
-        finite_column = RECONSTRUCTED_COLUMNS[self.kind] if only_reconstructed else None
+        finite_column = RECONSTRUCTED_COLUMN if only_reconstructed else None
         events = {}
         for tel_id in tel_ids:
             key = session.event_key(tel_id, self.kind, finite_column=finite_column)

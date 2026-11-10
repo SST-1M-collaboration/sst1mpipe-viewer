@@ -62,8 +62,8 @@ class DL3Page(Page):
             Histogram1DPanel(
                 spec.get("name", spec["column"]), title=spec.get("title", spec["column"]),
                 x_label=axis_label(spec["column"], spec.get("transform"), spec.get("unit")),
-                log_y=options[spec.get("name", spec["column"])]["log_y"], on_reset=self._reset,
-                colors={ALL: COLOR}, labels={ALL: "All observations"}, width=480, height=320,
+                on_reset=self._reset, colors={ALL: COLOR}, labels={ALL: "All observations"}, width=480,
+                height=320, **options[spec.get("name", spec["column"])],
             )
             for spec in config.get("hist1d", ())
         ]

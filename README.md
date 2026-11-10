@@ -15,8 +15,9 @@ One web page per data level, linked by the navigation bar at the top:
 | `/r0`, `/r1`, `/dl0` | **R0 / R1 / DL0** | Rate of the level in time; one block per selected telescope, with its own ◀ / ▶ (events of this telescope only) and its own **sample** slider, common to the waveform camera and the trigger traces: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 10 pixels), the camera of a per-pixel field chosen in a menu (the fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels, traces of the patches of the selected pixels); the table of all the fields, one column per telescope |
 | `/dl1` | **DL1 Event** | Rate of the level in time; per selected telescope (with its own ◀ / ▶): image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse; the table of all the DL1 and trigger fields |
 | `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations and camera maps (one plot per telescope), reset buttons (per plot, selected telescopes, all) |
-| `/dl2` | **DL2 Event** | Rate of the level in time; per selected telescope: the DL1 image with the Hillas ellipse and the **reconstructed source position** (star); the table of all the DL2 fields (energy, gammaness, direction, ...) |
-| `/dl2_statistics` | **DL2 Statistics** | Accumulated histograms of the DL2 parameters (reconstructed energy, gammaness, altitude, azimuth, disp), gammaness vs energy, reconstructed direction, source position in the camera |
+| `/dl2` | **DL2 Event** | Rate of the level in time; per selected telescope: the DL1 image with the Hillas ellipse, and the table of **all the DL2 fields of the telescope** (every algorithm: geometry, energy, classification, impact, disp, with their uncertainties, validity and goodness of fit) |
+| `/dl2_statistics` | **DL2 Statistics** | Per telescope, **the algorithm of each group chosen in a menu** (geometry, energy, classification, impact, disp): reconstructed energy and its uncertainty, gammaness, altitude, azimuth, impact distance, disp, validity flags; gammaness vs energy, direction, impact vs energy |
+| `/dl2_stereo` | **DL2 Stereo** | The stereo reconstruction of the subarray (not per telescope): rate; the displayed stereo event with its own ◀ / ▶ (reconstructed core on the ground with the telescopes, those used ringed, and the table of all its fields); statistics of all the stereo events with the algorithm menus (energy, gammaness, direction, h_max, core map, ...) |
 | `/dl3` | **DL3** | Gamma-ray candidates of the observations (not per telescope): table of the observations (object, target, pointing, events, livetime), rate of the events in time, energy, θ² to the target, sky map around the target, position in the field of view (DETX / DETY) |
 
 The pages opened by a browser share the selected telescopes, the displayed events and the selected
@@ -92,7 +93,7 @@ from sst1mpipe_viewer import ViewerStore, serve
 store = ViewerStore(subarray)            # ctapipe SubarrayDescription: camera geometries, positions
 
 # event by event (e.g. a stream): the last events are kept for the display
-store.push_event(event)                  # ctapipe ArrayEventContainer: R0, R1, DL0, DL1, DL2, trigger
+store.push_event(event)                  # ctapipe ArrayEventContainer: R0, R1, DL0, DL1, DL2 (tel and stereo), trigger
 store.push_container("dl1", event.dl1.tel[1], obs_id=obs_id, event_id=event_id, tel_id=1)
 store.push_row("dl1", row)               # dict or astropy table row
 
@@ -102,7 +103,7 @@ store.push_table("dl1", table)           # astropy table, e.g. /dl1/event/telesc
 serve(store, port=5006)                  # blocking: push the data from another thread
 ```
 
-The kinds of data are `r0`, `r1`, `dl0`, `dl1`, `dl2` and `trigger`. The columns are those of the
+The kinds of data are `r0`, `r1`, `dl0`, `dl1`, `dl2`, `dl2_stereo` and `trigger`. The columns are those of the
 ctapipe HDF5 tables: a container is flattened as by the ctapipe `DataWriter` (its fields keep their
 name, the fields of its sub-containers take their prefix: `image`, `peak_time`, `image_mask`,
 `hillas_intensity`, `leakage_intensity_width_2`, ...). Every row needs `obs_id`, `event_id` and
@@ -112,12 +113,26 @@ parameter row). The statistics are filled with the `dl1` and `dl2` rows (`store.
 frame written by sst1mpipe (`camera_frame_hillas_*`, in m) are converted to the telescope frame
 (`hillas_fov_lon`, `hillas_length`, ... in deg) with the camera geometry of the subarray.
 
-DL2: the columns are those of sst1mpipe (`/dl2/event/telescope/parameters/tel_XXX`: `reco_energy`
-in TeV, `gammaness`, `reco_alt`, `reco_az` in deg, `reco_src_x`, `reco_src_y` in m in the camera
-frame, ...). The DL2 of ctapipe (`<algorithm>_tel_energy`, `<algorithm>_tel_prediction`,
-`<algorithm>_tel_alt`, `<algorithm>_tel_az`, tables `/dl2/event/telescope/<group>/<algorithm>/tel_XXX`)
-are shown under these names. The pipeline does not produce DL2 yet: to try the DL2 pages,
-`scripts/make_synthetic_dl2.py` writes a copy of a DL1 file with **random** DL2 values:
+### DL2
+
+The DL2 are those of the ctapipe `DL2Container` (as in the `SST1MArrayEventContainer`):
+`event.dl2.tel[tel_id]` per telescope (kind `dl2`) and `event.dl2.stereo` for the subarray (kind
+`dl2_stereo`, stored as the events of the pseudo telescope `SUBARRAY_ID = 0`). The columns are
+those of the ctapipe tables, prefixed by the algorithm: `<algorithm>_tel_<field>` per telescope
+(`/dl2/event/telescope/<group>/<algorithm>/tel_XXX`) and `<algorithm>_<field>` in stereo
+(`/dl2/event/subarray/<group>/<algorithm>`).
+
+The quantities are grouped as in the container (`sst1mpipe_viewer.dl2`): **geometry** (`alt`, `az`,
+`core_x`, `core_y`, `h_max`, ... and their uncertainties), **energy** (`energy`, `energy_uncert`),
+**classification** (`prediction`), and per telescope **impact** (`impact_distance`) and **disp**
+(`disp_parameter`, `disp_sign_score`), plus `is_valid` and `goodness_of_fit`. The statistics are
+accumulated for every combination of one algorithm per group; the menus of the pages choose which
+one is shown. The quantities which are not plotted (uncertainties, goodness of fit, telescopes
+used, ...) are in the table of the fields of the displayed event. The DL2 tables of sst1mpipe
+(`reco_energy`, `gammaness`, `reco_alt`, `reco_az`) are shown as an algorithm called `sst1mpipe`.
+
+The pipeline does not produce DL2 yet: to try the DL2 pages, `scripts/make_synthetic_dl2.py`
+writes a copy of a DL1 file with **random** DL2 values in the ctapipe format (telescope and stereo):
 
 ```
 python scripts/make_synthetic_dl2.py tests/data/mrk421_tel21_tel22.h5 /tmp/synthetic_dl2.h5
@@ -181,19 +196,24 @@ sst1mpipe-viewer /tmp/synthetic_dl3.fits
 ## Statistics configuration
 
 The accumulated statistics of each data level are defined in a YAML file (defaults:
-`src/sst1mpipe_viewer/resources/dl1_statistics.yaml`, `dl2_statistics.yaml` and
-`dl3_statistics.yaml`; `--statistics-config`, `--dl2-statistics-config` and
-`--dl3-statistics-config` to use others):
+`src/sst1mpipe_viewer/resources/dl1_statistics.yaml`, `dl2_statistics.yaml`,
+`dl2_stereo_statistics.yaml` and `dl3_statistics.yaml`; `--statistics-config`,
+`--dl2-statistics-config`, `--dl2-stereo-statistics-config` and `--dl3-statistics-config` to use
+others):
 
 ```yaml
 hist1d:
-  - {column: hillas_intensity, transform: log10, range: [0, 5], bins: 50, log_y: true}
+  - {column: hillas_intensity, log_x: true, range: [1, 100000], bins: 50, log_y: true}
   - {column: hillas_width, range: [0, 0.4], bins: 50, unit: deg}
 hist2d:
-  - {x: hillas_intensity, x_transform: log10, x_range: [1, 5], x_bins: 40, y: hillas_length, y_range: [0, 1], y_bins: 40}
+  - {x: hillas_intensity, x_log: true, x_range: [10, 100000], x_bins: 40, y: hillas_length, y_range: [0, 1], y_bins: 40}
 camera:
   - {column: image_mask, mode: fraction}
 ```
+
+`log_x: true` gives logarithmic bins (of the values themselves, in `range`) drawn on a logarithmic
+axis; `x_log` / `y_log` do the same for the axes of a 2D histogram, and `log_y` is the logarithmic
+axis of the entries. (`transform: log10` is still available to histogram the logarithm of a column.)
 
 ## Code organisation
 
@@ -202,11 +222,13 @@ camera:
 | `store.py` | `ViewerStore`: the data received (events, tables) and the accumulated statistics; the input of the viewer |
 | `normalize.py` | Conversion of the inputs (containers, rows, tables) to columns `{name: numpy array}` |
 | `accumulators.py`, `config.py` | Histograms and camera maps, and their YAML configuration |
-| `frames.py`, `dl2.py`, `units.py` | Camera → telescope frame of the sst1mpipe parameters, DL2 column names, display units |
+| `frames.py`, `units.py` | Camera → telescope frame of the sst1mpipe parameters, display units |
+| `dl2.py` | DL2: algorithms, groups of quantities and generic field names of the ctapipe `DL2Container` |
+| `rates.py` | Rates per minute with their statistical uncertainties |
 | `dl3.py` | DL3 event lists: reading of the FITS files, accumulated histograms, offsets to the target |
 | `feeds.py` | Reading of files (HDF5 tables, ctapipe `EventSource`) into a store |
 | `app.py`, `server.py`, `cli.py` | Bokeh pages (header, navigation, state shared by the pages of a browser), server, command line |
-| `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2 Event), `statistics.py`, `dl3.py`, `pixel_selection.py` |
+| `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2 Event), `statistics.py`, `stereo.py` (DL2 Stereo), `dl3.py`, `pixel_selection.py` |
 | `components/` | Bokeh displays independent of the store: camera, waveforms, histograms, rates, array map, fields table |
 | `pixel_groups.py`, `colors.py` | DigiCam pixel groups (from CTS), colors of the telescopes |
 

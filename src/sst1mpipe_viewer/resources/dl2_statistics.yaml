@@ -1,19 +1,23 @@
 # Statistics accumulated by the "DL2 Statistics" page, per telescope (same format as
-# dl1_statistics.yaml).
+# dl1_statistics.yaml), for each combination of algorithms (chosen in the menus of the page).
 #
-# The columns are those of the DL2 of sst1mpipe (/dl2/event/telescope/parameters/tel_XXX):
-# reco_energy (TeV), gammaness, reco_alt and reco_az (deg), reco_src_x and reco_src_y (m, camera
-# frame). The DL2 of ctapipe (<algorithm>_tel_energy, <algorithm>_tel_prediction,
-# <algorithm>_tel_alt, <algorithm>_tel_az) are shown with these names (sst1mpipe_viewer.dl2).
+# The columns are the generic DL2 fields of sst1mpipe_viewer.dl2 (the fields of the ctapipe
+# TelescopeReconstructedContainer of the chosen algorithms): energy (TeV), prediction (gammaness),
+# alt, az (deg), impact_distance (m), disp_parameter (deg), <group>_is_valid, ...
 
 hist1d:
-  - {column: reco_energy, transform: log10, range: [-2, 3], bins: 50, title: "log10(reconstructed energy / TeV)", log_y: true}
-  - {column: gammaness, range: [0, 1], bins: 50, log_y: true}
-  - {column: reco_alt, range: [0, 90], bins: 90, unit: deg, title: "reconstructed altitude"}
-  - {column: reco_az, range: [0, 360], bins: 72, unit: deg, title: "reconstructed azimuth"}
-  - {column: reco_disp_norm, range: [0, 0.6], bins: 60, unit: m, title: "disp (camera frame)"}
+  - {column: energy, log_x: true, range: [0.01, 1000], bins: 50, unit: TeV, title: "reconstructed energy", log_y: true}
+  - {column: energy_uncert, log_x: true, range: [0.001, 1000], bins: 50, unit: TeV, title: "energy uncertainty"}
+  - {column: prediction, range: [0, 1], bins: 50, title: "gammaness (prediction)", log_y: true}
+  - {column: alt, range: [0, 90], bins: 90, unit: deg, title: "reconstructed altitude"}
+  - {column: az, range: [0, 360], bins: 72, unit: deg, title: "reconstructed azimuth"}
+  - {column: impact_distance, range: [0, 500], bins: 50, unit: m, title: "impact distance"}
+  - {column: disp_parameter, range: [-3, 3], bins: 60, unit: deg, title: "disp"}
+  - {column: energy_is_valid, range: [-0.5, 1.5], bins: 2, title: "energy is valid (0 / 1)"}
+  - {column: classification_is_valid, range: [-0.5, 1.5], bins: 2, title: "classification is valid (0 / 1)"}
+  - {column: geometry_is_valid, range: [-0.5, 1.5], bins: 2, title: "geometry is valid (0 / 1)"}
 
 hist2d:
-  - {x: reco_energy, x_transform: log10, x_range: [-2, 3], x_bins: 50, y: gammaness, y_range: [0, 1], y_bins: 40, title: "gammaness vs log10(energy / TeV)"}
-  - {x: reco_az, x_range: [0, 360], x_bins: 72, y: reco_alt, y_range: [0, 90], y_bins: 45, title: "reconstructed direction (alt / az, deg)"}
-  - {x: reco_src_x, x_range: [-0.5, 0.5], x_bins: 50, y: reco_src_y, y_range: [-0.5, 0.5], y_bins: 50, title: "reconstructed source position in the camera (m)"}
+  - {x: energy, x_log: true, x_range: [0.01, 1000], x_bins: 50, y: prediction, y_range: [0, 1], y_bins: 40, title: "gammaness vs energy (TeV)"}
+  - {x: az, x_range: [0, 360], x_bins: 72, y: alt, y_range: [0, 90], y_bins: 45, title: "reconstructed direction (alt / az, deg)"}
+  - {x: energy, x_log: true, x_range: [0.01, 1000], x_bins: 50, y: impact_distance, y_range: [0, 500], y_bins: 50, title: "impact distance (m) vs energy (TeV)"}

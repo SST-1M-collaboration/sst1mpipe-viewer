@@ -1,6 +1,6 @@
 """
 Bokeh documents of the viewer: one web page per data level (Array, R0, R1, DL0, DL1 Event,
-DL1 Statistics, DL2 Event, DL2 Statistics, DL3), with a header (navigation, displayed events).
+DL1 Statistics, DL2 Event, DL2 Statistics, DL2 Stereo, DL3), with a header (navigation, displayed events).
 
 The pages opened by a browser share a `UserState`: the selected telescopes (chosen in the Array
 page), the displayed event of each telescope and the selected pixels. It is found by the client id
@@ -23,10 +23,13 @@ from ctapipe.coordinates import TelescopeFrame
 
 from .colors import telescope_color
 from .components import CameraPanel
-from .pages import ArrayPage, DL3Page, ImageEventPage, StatisticsPage, WaveformPage
+from .dl2 import SUBARRAY_ID
+from .pages import ArrayPage, DL2StereoPage, DL3Page, ImageEventPage, StatisticsPage, WaveformPage
 
 __all__ = ["PAGES", "StateRegistry", "UserState", "ViewerSession", "make_document"]
 
+#: color of the stereo (subarray) data
+SUBARRAY_COLOR = "#444444"
 #: background of the banner, the logo is white
 BANNER_COLOR = "#282828"
 #: period of the check for changes (ms): new data, actions in the other pages of the browser
@@ -49,6 +52,7 @@ PAGES = {
     "dl1_statistics": ("/dl1_statistics", "DL1 Statistics", lambda session: StatisticsPage(session, "dl1")),
     "dl2": ("/dl2", "DL2 Event", lambda session: ImageEventPage(session, "dl2")),
     "dl2_statistics": ("/dl2_statistics", "DL2 Statistics", lambda session: StatisticsPage(session, "dl2")),
+    "dl2_stereo": ("/dl2_stereo", "DL2 Stereo", DL2StereoPage),
     "dl3": ("/dl3", "DL3", DL3Page),
 }
 
@@ -90,7 +94,7 @@ class UserState:
         self.tel_ids = list(store.tel_ids)  # all the telescopes are selected at first
         # data pushed event by event (a stream): follow the last events; tables only (a file):
         # show the first event of each telescope
-        first = {tel_id: keys[0] for tel_id in self.tel_ids if (keys := store.event_keys(tel_id))}
+        first = {tel_id: keys[0] for tel_id in store.event_tel_ids if (keys := store.event_keys(tel_id))}
         self.follow = store.has_event_data or not first
         self.event_keys = {} if self.follow else first
         # without data yet: go to the first events if the data come as tables (a file being loaded)
@@ -242,8 +246,17 @@ class ViewerSession:
         return list(self.store.tel_ids)
 
     def color(self, tel_id):
-        """Color of a telescope, the same in all the pages"""
-        return telescope_color(tel_id, self.all_tel_ids)
+        """Color of a telescope, the same in all the pages (grey for the subarray, `SUBARRAY_ID`)"""
+        return SUBARRAY_COLOR if tel_id == SUBARRAY_ID else telescope_color(tel_id, self.all_tel_ids)
+
+    @staticmethod
+    def tel_label(tel_id):
+        """Name of a telescope in the pages: ``TEL 21``, or ``Subarray`` for the stereo data"""
+        return "Subarray" if tel_id == SUBARRAY_ID else f"TEL {tel_id}"
+
+    def _browsed_tel_ids(self):
+        """The selected telescopes, and the subarray if there are stereo events: what Prev / Next move"""
+        return self.tel_ids + [t for t in self.store.event_tel_ids if t == SUBARRAY_ID]
 
     @property
     def follow(self):
@@ -312,7 +325,7 @@ class ViewerSession:
         if not value or not self.tel_ids:
             return
         found = {}
-        for tel_id in self.tel_ids:
+        for tel_id in self._browsed_tel_ids():
             keys = self.store.event_keys(tel_id)
             try:
                 if value.startswith("#"):
@@ -340,7 +353,8 @@ class ViewerSession:
         """Displayed events when leaving the Live mode: the last events"""
         state = self.state
         if state.follow:
-            state.event_keys = {t: k for t in self.all_tel_ids if (k := self.store.latest_key(t)) is not None}
+            state.event_keys = {t: k for t in self.store.event_tel_ids
+                                if (k := self.store.latest_key(t)) is not None}
             state.follow = False
 
     def _live_clicked(self, active):
@@ -366,7 +380,7 @@ class ViewerSession:
         """Show the previous (-1) or next (+1) event of each selected telescope (or of ``tel_ids``)"""
         self._browse()
         state = self.state
-        for tel_id in self.tel_ids if tel_ids is None else tel_ids:
+        for tel_id in self._browsed_tel_ids() if tel_ids is None else tel_ids:
             keys = self.store.event_keys(tel_id)
             if not keys:
                 continue
@@ -458,7 +472,7 @@ class ViewerSession:
         if store.has_event_data:  # a stream, not a file: the Live mode is kept
             state.auto_browse = False
             return
-        first = {t: keys[0] for t in store.tel_ids if (keys := store.event_keys(t))}
+        first = {t: keys[0] for t in store.event_tel_ids if (keys := store.event_keys(t))}
         if first:
             state.auto_browse = False
             state.follow = False

@@ -63,7 +63,8 @@ class FieldsTable:
     column per telescope (value of the scalars, description of the arrays, times, event types)
     """
 
-    def __init__(self, width=900, height=400):
+    def __init__(self, width=900, height=400, labels=None):
+        self._labels = labels or {}  # {tel_id: title of its column}, "TEL <tel_id>" by default
         self.source = ColumnDataSource(data=dict(name=[], unit=[]))
         self.table = DataTable(source=self.source, columns=[], width=width, height=height, index_position=None,
                                sortable=False)
@@ -81,8 +82,8 @@ class FieldsTable:
             self._tel_ids = tel_ids
             self.table.columns = (
                 [TableColumn(field="name", title="Field", width=200)]
-                + [TableColumn(field=f"tel_{t}", title=f"TEL {t}", width=260, formatter=StringFormatter())
-                   for t in tel_ids]
+                + [TableColumn(field=f"tel_{t}", title=self._labels.get(t, f"TEL {t}"), width=260,
+                               formatter=StringFormatter()) for t in tel_ids]
                 + [TableColumn(field="unit", title="Unit", width=60)]
             )
         values = {}

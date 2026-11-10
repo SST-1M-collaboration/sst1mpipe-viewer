@@ -29,7 +29,7 @@ def test_all_pages_refresh(subarray):
     store, session = make_session(subarray)
     assert session.tel_ids == [1, 2]  # all the telescopes are selected at first
     assert [p.title for p in session.pages] == ["Array", "R0", "R1", "DL0", "DL1 Event", "DL1 Statistics",
-                                                "DL2 Event", "DL2 Statistics", "DL3"]
+                                                "DL2 Event", "DL2 Statistics", "DL2 Stereo", "DL3"]
     refresh_all(session)
     r0, r1 = session.pages[1], session.pages[2]
     # one block per selected telescope
@@ -158,7 +158,7 @@ def test_server_pages(subarray):
     server = make_server(store, port=0, refresh_period=2000)
     try:
         assert set(server._tornado.applications) == {"/", "/r0", "/r1", "/dl0", "/dl1", "/dl1_statistics", "/dl2",
-                                                       "/dl2_statistics", "/dl3"}
+                                                       "/dl2_statistics", "/dl2_stereo", "/dl3"}
         for path, title in (("/", "Array"), ("/r1", "R1"), ("/dl1_statistics", "DL1 Statistics"),
                             ("/dl2_statistics", "DL2 Statistics")):
             doc = Document()
@@ -246,20 +246,44 @@ def test_stream_keeps_following(subarray):
 
 
 def test_dl2_pages(subarray):
-    """DL2 Event: the DL1 image with the reconstructed source; DL2 Statistics"""
+    """DL2 Event: all the DL2 fields; DL2 Statistics: the algorithm of each group chosen in a menu"""
     store = ViewerStore(subarray)
     store.push_row("dl1", dl1_row(1))
-    store.push_row("dl2", dict(obs_id=1, event_id=1, tel_id=1, reco_energy=1.0, gammaness=0.8, reco_alt=70.0,
-                               reco_az=10.0, reco_src_x=0.1, reco_src_y=0.0))
+    store.push_row("dl2", dict(obs_id=1, event_id=1, tel_id=1, RF_tel_energy=1.0, Other_tel_energy=100.0,
+                               Classifier_tel_prediction=0.8, Hillas_tel_alt=70.0, Hillas_tel_az=10.0))
     session = Browser(store)
     refresh_all(session)
     page = session.pages[6]
-    camera = page.views[1].camera
-    assert camera._source_source.data["x"]  # the reconstructed source position
-    assert "gammaness" in page.fields.source.data["name"]
+    assert "RF_tel_energy" in page.fields.source.data["name"]
     statistics = session.pages[7]
     assert statistics.counters_source.data["rows"] == [1, 0]
-    assert statistics.hist1d[1].captions[1].text.startswith("TEL 1: N=1")
+    assert statistics.algorithm_selects["energy"].options == ["Other", "RF"]
+    assert not statistics.algorithm_selects["disp"].visible
+    energy = statistics.hist1d[0]
+    assert energy.captions[1].text.startswith("TEL 1: N=1 mean=100 ")
+    assert energy.figure.x_scale.__class__.__name__ == "LogScale"  # logarithmic bins on a logarithmic axis
+    statistics.algorithm_selects["energy"].value = "RF"
+    statistics.refresh()
+    assert energy.captions[1].text.startswith("TEL 1: N=1 mean=1 ")
+
+
+def test_dl2_stereo_page(subarray):
+    """DL2 Stereo: the displayed stereo event (core, fields), browsed with the telescopes, and its statistics"""
+    store = ViewerStore(subarray)
+    store.push_table("dl1", Table(rows=[dl1_row(i) for i in (1, 2)]))
+    store.push_table("dl2_stereo", Table(dict(
+        obs_id=[1, 1], event_id=[1, 2], Hillas_alt=[70.0, 71.0], Hillas_az=[10.0, 11.0], Hillas_core_x=[5.0, -20.0],
+        Hillas_core_y=[1.0, 2.0], Hillas_telescopes=[[True, True], [True, False]], RF_energy=[1.0, 2.0])))
+    session = Browser(store)
+    refresh_all(session)
+    page = next(p for p in session.pages if p.title == "DL2 Stereo")
+    assert page.core_source.data == dict(x=[5.0], y=[1.0])
+    assert "telescopes 1, 2" in page.summary.text and "Hillas_core_x" in page.fields.source.data["name"]
+    assert page.statistics.counters_source.data == dict(tel=["Subarray"], rows=[2])
+    session.step(+1)  # Next moves the telescopes and the subarray
+    page.refresh()
+    assert page.core_source.data == dict(x=[-20.0], y=[2.0]) and "telescopes 1" in page.summary.text
+    assert list(page.telescopes_source.data["line"]).count("white") == 1
 
 
 def test_rate_panel():

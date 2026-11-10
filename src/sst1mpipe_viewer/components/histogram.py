@@ -48,12 +48,14 @@ class Histogram1DPanel:
     ----------
     colors : dict
         Color of each telescope ``{tel_id: color}``.
+    log_x, log_y : bool
+        Logarithmic axes (``log_x`` for a histogram with logarithmic bins).
     labels : dict or None
         Name of each series in the captions ``{tel_id: label}``, ``TEL <tel_id>`` by default.
     """
 
     def __init__(self, name, title=None, x_label=None, log_y=False, on_reset=None, width=330, height=270,
-                 colors=None, labels=None):
+                 colors=None, labels=None, log_x=False):
         self.name = name
         self._labels = labels or {}
         self._ranges_set = False
@@ -61,7 +63,8 @@ class Histogram1DPanel:
         self.log_y = log_y
         self.figure = figure(
             title=title or name, width=width, height=height, tools=TOOLS, toolbar_location="above",
-            y_axis_type="log" if log_y else "linear", x_range=Range1d(0, 1),
+            y_axis_type="log" if log_y else "linear", x_axis_type="log" if log_x else "linear",
+            x_range=Range1d(1, 10) if log_x else Range1d(0, 1),
         )
         self.figure.xaxis.axis_label = x_label or name
         self.figure.yaxis.axis_label = "entries"
@@ -127,12 +130,15 @@ class Histogram2DPanel:
     """Display of a `~sst1mpipe_viewer.accumulators.Histogram2D` snapshot"""
 
     def __init__(self, name, title=None, x_label=None, y_label=None, on_reset=None, log_z=False,
-                 width=380, height=330):
+                 width=380, height=330, log_x=False, log_y=False):
         self.name = name
         self._ranges_set = False
         self._state = None
-        self.figure = figure(title=title or name, width=width, height=height, tools=TOOLS,
-                             toolbar_location="above", x_range=Range1d(0, 1), y_range=Range1d(0, 1))
+        # logarithmic bins are drawn on a logarithmic axis, where they have the same width
+        self.figure = figure(title=title or name, width=width, height=height, tools=TOOLS, toolbar_location="above",
+                             x_axis_type="log" if log_x else "linear", y_axis_type="log" if log_y else "linear",
+                             x_range=Range1d(1, 10) if log_x else Range1d(0, 1),
+                             y_range=Range1d(1, 10) if log_y else Range1d(0, 1))
         self.figure.xaxis.axis_label = x_label or ""
         self.figure.yaxis.axis_label = y_label or ""
         self.figure.title.text_font_size = "11pt"

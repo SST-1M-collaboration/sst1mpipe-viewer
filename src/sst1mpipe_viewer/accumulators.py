@@ -36,12 +36,29 @@ def _transform(name):
         raise ValueError(f"Unknown transform {name!r}, known: {[k for k in TRANSFORMS if k]}") from None
 
 
-def make_bins(bins=50, range=None, edges=None):
-    """Bin edges: ``edges`` if given, else ``bins`` bins in ``range``"""
+def make_bins(bins=50, range=None, edges=None, log=False):
+    """
+    Bin edges of a histogram.
+
+    Parameters
+    ----------
+    bins : int
+        Number of bins.
+    range : (float, float)
+        First and last edges.
+    edges : array or None
+        The edges themselves (``bins`` and ``range`` are then ignored).
+    log : bool
+        Logarithmic bins (same width on a logarithmic axis): the range must be positive.
+    """
     if edges is not None:
         return np.asarray(edges, dtype=float)
     if range is None:
         raise ValueError("A range (or the bin edges) is required")
+    if log:
+        if not 0 < range[0] < range[1]:
+            raise ValueError(f"Logarithmic bins need a positive range, got {tuple(range)}")
+        return np.geomspace(range[0], range[1], int(bins) + 1)
     return np.linspace(range[0], range[1], int(bins) + 1)
 
 

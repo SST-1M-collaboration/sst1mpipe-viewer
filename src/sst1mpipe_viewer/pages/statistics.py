@@ -11,6 +11,8 @@ from bokeh.models import Button, ColumnDataSource, DataTable, Div, Select, Table
 
 from ..components import Histogram1DPanel, Histogram2DPanel
 from ..config import display_options
+from ..dl2 import GROUPS, SUBARRAY_ID
+from ..store import DL2_KINDS
 from ..units import column_unit
 from .base import Page
 
@@ -47,24 +49,39 @@ class StatisticsPage(Page):
     session : ViewerSession
         The page of the browser.
     kind : str
-        ``"dl1"`` or ``"dl2"``.
+        ``"dl1"``, ``"dl2"`` or ``"dl2_stereo"``. The stereo statistics are those of the subarray
+        (a single series, `SUBARRAY_ID`), not of the selected telescopes.
+
+    The DL2 are reconstructed by algorithms: the page has one menu per group of quantities
+    (geometry, energy, classification, ...) to choose the algorithm whose histograms are shown
+    (`sst1mpipe_viewer.dl2`).
     """
 
     def __init__(self, session, kind="dl1"):
         super().__init__(session)
         self.kind = kind
-        self.title = f"{kind.upper()} Statistics"
+        self.stereo = kind == "dl2_stereo"
+        self.title = "DL2 Stereo Statistics" if self.stereo else f"{kind.upper()} Statistics"
         config = self.store.statistics_configs[kind]
         options = display_options(config)
-        all_tel_ids = session.all_tel_ids
+        all_tel_ids = [SUBARRAY_ID] if self.stereo else session.all_tel_ids
         colors = {tel_id: session.color(tel_id) for tel_id in all_tel_ids}
+        labels = {tel_id: session.tel_label(tel_id) for tel_id in all_tel_ids}
+        # DL2: the algorithm of each group, chosen in a menu (filled with the algorithms received)
+        self.algorithm_selects = {}
+        if kind in DL2_KINDS:
+            for group in GROUPS:
+                select = Select(title=f"{group.capitalize()} algorithm", value="", options=[], width=230,
+                                visible=False)
+                select.on_change("value", lambda attr, old, new: self._algorithm_changed())
+                self.algorithm_selects[group] = select
 
         self.hist1d = [
             Histogram1DPanel(
                 spec.get("name", spec["column"]), title=spec.get("title", spec["column"]),
                 x_label=axis_label(spec["column"], spec.get("transform"), spec.get("unit")),
-                log_y=options[spec.get("name", spec["column"])]["log_y"], on_reset=self._reset_selected,
-                colors=colors,
+                on_reset=self._reset_selected, colors=colors, labels=labels,
+                **options[spec.get("name", spec["column"])],
             )
             for spec in config.get("hist1d", ())
         ]
@@ -74,9 +91,10 @@ class StatisticsPage(Page):
             name = spec.get("name", f"{spec['y']}_vs_{spec['x']}")
             for tel_id in all_tel_ids:
                 panel = Histogram2DPanel(
-                    name, title=f"{spec.get('title') or name} – TEL {tel_id}",
+                    name, title=f"{spec.get('title') or name} – {labels[tel_id]}",
                     x_label=axis_label(spec["x"], spec.get("x_transform")),
                     y_label=axis_label(spec["y"], spec.get("y_transform")), on_reset=self._reset_selected,
+                    **options[name],
                 )
                 panel.figure.title.text_color = colors[tel_id]
                 self.hist2d[(name, tel_id)] = panel
@@ -87,7 +105,7 @@ class StatisticsPage(Page):
         self.camera_map = Select(title="Camera map", value=next(iter(maps), ""), options=list(maps), width=420)
         self.camera_map.on_change("value", lambda attr, old, new: self._refresh_maps(force=True))
         self.maps = {}
-        if maps:
+        if maps and not self.stereo:
             for tel_id in all_tel_ids:
                 panel = session.camera_panel(geometry=session.geometry(tel_id), title="",
                                              on_pixel_click=session.pixel_click(tel_id), width=420, height=380)
@@ -97,10 +115,11 @@ class StatisticsPage(Page):
         self._snapshots = {}
 
         # a table, not a Div: changing a Div lays out the whole page again (slow)
+        level = "Stereo DL2" if self.stereo else kind.upper()
         self.counters_source = ColumnDataSource(data=dict(tel=[], rows=[]))
         self.counters = DataTable(source=self.counters_source, index_position=None, width=400, height=80, columns=[
             TableColumn(field="tel", title="Telescope", width=100),
-            TableColumn(field="rows", title=f"{kind.upper()} rows accumulated", width=200),
+            TableColumn(field="rows", title=f"{level} rows accumulated", width=200),
         ])
         self.reset_tel = Button(label="Reset selected telescopes", width=190, button_type="warning")
         self.reset_tel.on_click(lambda: self._reset_selected())
@@ -111,7 +130,11 @@ class StatisticsPage(Page):
         self.maps_row = row()
         self._shown_tel_ids = None
 
+        self.reset_tel.visible = not self.stereo
+        if self.stereo:
+            self.reset_all.label = "Reset the stereo statistics"
         sections = [
+            row(*self.algorithm_selects.values()),
             row(self.counters, column(Div(text=""), row(self.reset_tel, self.reset_all))),
             self.legend,
             _section("Parameter distributions"),
@@ -131,9 +154,42 @@ class StatisticsPage(Page):
 
     def _reset_selected(self, name=None):
         """Reset the statistics of the selected telescopes (one histogram ``name``, or all)"""
-        for tel_id in self.session.tel_ids:
+        for tel_id in self._tel_ids():
             self.store.reset_statistics(tel_id, name, kind=self.kind)
         self.session.request_refresh()
+
+    # ------------------------------------------------------------ algorithms
+    def algorithms(self):
+        """The algorithms chosen in the menus ``{group: algorithm}`` (empty for the DL1)"""
+        return {group: select.value for group, select in self.algorithm_selects.items() if select.value}
+
+    def _update_algorithm_menus(self, tel_ids):
+        """Options of the menus: the algorithms received for the telescopes (a menu without algorithm is hidden)"""
+        received = {}
+        for tel_id in tel_ids:
+            for group, names in self.store.algorithms(tel_id, self.kind).items():
+                received.setdefault(group, [])
+                received[group] += [name for name in names if name not in received[group]]
+        for group, select in self.algorithm_selects.items():
+            options = received.get(group, [])
+            if list(select.options) != options:
+                select.options = options
+            if options and select.value not in options:
+                select.value = options[0]
+            if select.visible != bool(options):
+                select.visible = bool(options)
+
+    def _algorithm_changed(self):
+        """Another algorithm was chosen: its histograms are shown"""
+        for panel in (*self.hist1d, *self.hist2d.values()):
+            panel.invalidate()
+        self.session.request_refresh()
+
+    def _tel_ids(self):
+        """The telescopes shown: the selected ones, or the subarray for the stereo statistics"""
+        if self.stereo:
+            return [SUBARRAY_ID]
+        return [t for t in self.session.tel_ids if t in self.session.all_tel_ids]
 
     # --------------------------------------------------------------- display
     def _set_layout(self, tel_ids):
@@ -143,7 +199,8 @@ class StatisticsPage(Page):
         self._shown_tel_ids = tel_ids
         session = self.session
         self.legend.text = "Telescopes: " + " &nbsp; ".join(
-            f"<span style='color: {session.color(t)}; font-weight: bold'>&#9632; TEL {t}</span>" for t in tel_ids)
+            f"<span style='color: {session.color(t)}; font-weight: bold'>&#9632; {session.tel_label(t)}</span>"
+            for t in tel_ids)
         self.correlations.children = [
             row([self.hist2d[(name, t)].layout for t in tel_ids if (name, t) in self.hist2d])
             for name in self._hist2d_names
@@ -155,11 +212,13 @@ class StatisticsPage(Page):
     def refresh(self):
         """Show the statistics of the selected telescopes"""
         session = self.session
-        tel_ids = [t for t in session.tel_ids if t in session.all_tel_ids]
+        tel_ids = self._tel_ids()
         self._set_layout(tel_ids)
-        snapshots = {tel_id: self.store.statistics(tel_id, self.kind) for tel_id in tel_ids}
+        self._update_algorithm_menus(tel_ids)
+        algorithms = self.algorithms()
+        snapshots = {tel_id: self.store.statistics(tel_id, self.kind, algorithms) for tel_id in tel_ids}
         self._snapshots = snapshots
-        self.counters_source.data = dict(tel=[f"TEL {t}" for t in tel_ids],
+        self.counters_source.data = dict(tel=[session.tel_label(t) for t in tel_ids],
                                          rows=[s["n_rows"] for s in snapshots.values()])
         for panel in self.hist1d:
             panel.update({t: s["accumulators"][panel.name] for t, s in snapshots.items()

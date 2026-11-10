@@ -4,8 +4,9 @@ Configuration of the accumulated statistics of a data level (YAML files, see
 
 A configuration lists the histograms of the statistics page of the level:
 
-- ``hist1d``: histograms of one column;
-- ``hist2d``: histograms of two columns (correlations);
+- ``hist1d``: histograms of one column (``log_x: true`` for logarithmic bins and axis, the range
+  being that of the values; ``log_y: true`` for a logarithmic axis of the entries);
+- ``hist2d``: histograms of two columns (correlations; ``x_log`` / ``y_log`` for logarithmic bins);
 - ``camera``: per pixel maps of an image column (DL1).
 """
 
@@ -20,7 +21,7 @@ __all__ = ["STATISTICS_KINDS", "DEFAULT_STATISTICS_CONFIGS", "load_statistics_co
            "display_options"]
 
 #: data levels with accumulated statistics
-STATISTICS_KINDS = ("dl1", "dl2")
+STATISTICS_KINDS = ("dl1", "dl2", "dl2_stereo")
 
 #: default configuration file of each data level
 DEFAULT_STATISTICS_CONFIGS = {
@@ -40,7 +41,7 @@ def load_statistics_config(path=None, kind="dl1"):
     path : str, Path or None
         The YAML file; None for the default configuration of ``kind``.
     kind : str
-        The data level (``"dl1"``, ``"dl2"`` or ``"dl3"``), for the default configuration.
+        The data level (``"dl1"``, ``"dl2"``, ``"dl2_stereo"`` or ``"dl3"``), for the default configuration.
 
     Returns
     -------
@@ -76,14 +77,17 @@ def build_statistics(config, n_pixels):
     for spec in config.get("hist1d", ()):
         spec = dict(spec)
         column = spec.pop("column")
-        bins = make_bins(spec.pop("bins", 50), spec.pop("range", None), spec.pop("edges", None))
+        bins = make_bins(spec.pop("bins", 50), spec.pop("range", None), spec.pop("edges", None),
+                         log=spec.pop("log_x", False))
         spec.pop("log_y", None)  # display option
         statistics.add(Histogram1D(name=spec.pop("name", column), column=column, bins=bins, **spec))
     for spec in config.get("hist2d", ()):
         spec = dict(spec)
         x, y = spec.pop("x"), spec.pop("y")
-        x_bins = make_bins(spec.pop("x_bins", 40), spec.pop("x_range", None), spec.pop("x_edges", None))
-        y_bins = make_bins(spec.pop("y_bins", 40), spec.pop("y_range", None), spec.pop("y_edges", None))
+        x_bins = make_bins(spec.pop("x_bins", 40), spec.pop("x_range", None), spec.pop("x_edges", None),
+                           log=spec.pop("x_log", False))
+        y_bins = make_bins(spec.pop("y_bins", 40), spec.pop("y_range", None), spec.pop("y_edges", None),
+                           log=spec.pop("y_log", False))
         name = spec.pop("name", f"{y}_vs_{x}")
         statistics.add(Histogram2D(name=name, x=x, y=y, x_bins=x_bins, y_bins=y_bins, **spec))
     for spec in config.get("camera", ()):
@@ -96,8 +100,15 @@ def build_statistics(config, n_pixels):
 
 
 def display_options(config):
-    """Display options of the 1D histograms, by name: ``{name: {"log_y": bool}}``"""
+    """
+    Display options of the histograms, by name: the logarithmic axes. ``{name: {"log_x": bool,
+    "log_y": bool}}`` (for a 2D histogram, the axes of its ``x_log`` and ``y_log`` bins).
+    """
     options = {}
     for spec in config.get("hist1d", ()):
-        options[spec.get("name", spec["column"])] = {"log_y": bool(spec.get("log_y", False))}
+        options[spec.get("name", spec["column"])] = {"log_x": bool(spec.get("log_x", False)),
+                                                     "log_y": bool(spec.get("log_y", False))}
+    for spec in config.get("hist2d", ()):
+        options[spec.get("name", f"{spec['y']}_vs_{spec['x']}")] = {"log_x": bool(spec.get("x_log", False)),
+                                                                   "log_y": bool(spec.get("y_log", False))}
     return options

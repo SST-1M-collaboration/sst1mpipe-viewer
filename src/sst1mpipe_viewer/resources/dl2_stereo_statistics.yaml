@@ -1,0 +1,21 @@
+# Statistics accumulated by the "DL2 Stereo" page, for the subarray (same format as
+# dl1_statistics.yaml), for each combination of algorithms (chosen in the menus of the page).
+#
+# The columns are the generic DL2 fields of sst1mpipe_viewer.dl2 (the fields of the ctapipe
+# ReconstructedContainer of the chosen algorithms): energy (TeV), prediction (gammaness), alt, az
+# (deg), core_x, core_y, h_max (m), <group>_is_valid, ...
+
+hist1d:
+  - {column: energy, log_x: true, range: [0.01, 1000], bins: 50, unit: TeV, title: "reconstructed energy", log_y: true}
+  - {column: prediction, range: [0, 1], bins: 50, title: "gammaness (prediction)", log_y: true}
+  - {column: alt, range: [0, 90], bins: 90, unit: deg, title: "reconstructed altitude"}
+  - {column: az, range: [0, 360], bins: 72, unit: deg, title: "reconstructed azimuth"}
+  - {column: h_max, range: [0, 20000], bins: 50, unit: m, title: "height of the shower maximum"}
+  - {column: ang_distance_uncert, range: [0, 2], bins: 50, unit: deg, title: "direction uncertainty"}
+  - {column: average_intensity, log_x: true, range: [1, 100000], bins: 50, unit: p.e., title: "average intensity"}
+  - {column: geometry_is_valid, range: [-0.5, 1.5], bins: 2, title: "geometry is valid (0 / 1)"}
+
+hist2d:
+  - {x: core_x, x_range: [-500, 500], x_bins: 50, y: core_y, y_range: [-500, 500], y_bins: 50, name: core, title: "reconstructed core position (m)"}
+  - {x: az, x_range: [0, 360], x_bins: 72, y: alt, y_range: [0, 90], y_bins: 45, title: "reconstructed direction (alt / az, deg)"}
+  - {x: energy, x_log: true, x_range: [0.01, 1000], x_bins: 50, y: prediction, y_range: [0, 1], y_bins: 40, title: "gammaness vs energy (TeV)"}

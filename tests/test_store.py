@@ -44,22 +44,82 @@ def test_statistics_and_reset(subarray):
 
 
 def test_dl2(subarray):
-    """DL2 rows: statistics of their own, ctapipe columns shown with the names of sst1mpipe"""
+    """DL2 rows of ctapipe: statistics per combination of algorithms, with generic field names"""
     store = ViewerStore(subarray)
-    rows = [dict(obs_id=1, event_id=i, tel_id=1, reco_energy=10.0 ** (i - 2), gammaness=0.1 * i,
-                 reco_alt=70.0, reco_az=180.0, reco_src_x=0.1, reco_src_y=-0.1) for i in range(1, 6)]
+    rows = [dict(obs_id=1, event_id=i, tel_id=1, RF_tel_energy=10.0 ** (i - 2), RF_tel_energy_uncert=0.1,
+                 RF_tel_is_valid=True, Classifier_tel_prediction=0.1 * i, Hillas_tel_alt=70.0, Hillas_tel_az=180.0,
+                 Hillas_tel_impact_distance=100.0, Other_tel_energy=1.0) for i in range(1, 6)]
     store.push_table("dl2", Table(rows=rows))
-    snapshot = store.statistics(1, "dl2")
+    assert store.algorithms(1) == {"geometry": ["Hillas"], "energy": ["Other", "RF"], "classification": ["Classifier"],
+                                   "impact": ["Hillas"]}
+    snapshot = store.statistics(1, "dl2", {"energy": "RF"})
     assert snapshot["n_rows"] == 5
-    assert snapshot["accumulators"]["gammaness"]["n_entries"] == 5
+    assert snapshot["accumulators"]["prediction"]["n_entries"] == 5
+    assert snapshot["accumulators"]["impact_distance"]["n_entries"] == 5
+    assert snapshot["accumulators"]["energy"]["counts"].sum() == 5 and snapshot["accumulators"]["energy"]["std"] > 0
+    other = store.statistics(1, "dl2")  # the first algorithm of each group
+    assert other["accumulators"]["energy"]["std"] == 0 and other["accumulators"]["prediction"]["n_entries"] == 5
     assert store.statistics(1)["n_rows"] == 0  # the DL1 statistics are separate
-    # ctapipe DL2 (DataWriter names), pushed event by event
-    store.push_row("dl2", dict(obs_id=1, event_id=9, tel_id=1, RandomForestRegressor_tel_energy=1.0,
-                               RandomForestClassifier_tel_prediction=0.9))
-    assert store.event(1, (1, 9))["dl2"]["gammaness"] == 0.9
-    assert store.statistics(1, "dl2")["accumulators"]["reco_energy"]["n_entries"] == 6
+    # event by event (buffered), and the DL2 of sst1mpipe shown as the algorithm "sst1mpipe"
+    store.push_row("dl2", dict(obs_id=1, event_id=9, tel_id=2, reco_energy=1.0, gammaness=0.9))
+    assert store.event(2, (1, 9))["dl2"]["sst1mpipe_tel_prediction"] == 0.9
+    assert store.algorithms(2) == {"energy": ["sst1mpipe"], "classification": ["sst1mpipe"]}
+    assert store.statistics(2, "dl2")["accumulators"]["energy"]["n_entries"] == 1
     store.reset_statistics(kind="dl2")
     assert store.statistics(1, "dl2")["n_rows"] == 0
+
+
+def test_dl2_stereo(subarray):
+    """The stereo DL2 are the events of the pseudo telescope SUBARRAY_ID"""
+    from sst1mpipe_viewer.dl2 import SUBARRAY_ID
+
+    store = ViewerStore(subarray)
+    table = Table(dict(obs_id=[1, 1], event_id=[1, 2], Hillas_alt=[70.0, 71.0], Hillas_az=[10.0, 11.0],
+                       Hillas_core_x=[5.0, -20.0], Hillas_core_y=[1.0, 2.0], Hillas_is_valid=[True, True],
+                       Hillas_telescopes=[[True, True], [True, False]], RF_energy=[1.0, 2.0]))
+    store.push_table("dl2_stereo", table)
+    assert store.tel_ids == [1, 2] and store.event_tel_ids == [1, 2, SUBARRAY_ID]
+    assert store.event_keys(SUBARRAY_ID) == [(1, 1), (1, 2)]
+    assert store.algorithms(SUBARRAY_ID, "dl2_stereo") == {"geometry": ["Hillas"], "energy": ["RF"]}
+    snapshot = store.statistics(SUBARRAY_ID, "dl2_stereo")
+    assert snapshot["accumulators"]["core"]["counts"].sum() == 2
+    assert snapshot["accumulators"]["energy"]["n_entries"] == 2
+    store.push_row("dl2_stereo", dict(obs_id=1, event_id=3, Hillas_alt=72.0, Hillas_az=12.0))
+    assert store.latest_key(SUBARRAY_ID, "dl2_stereo") == (1, 3)
+    # a row without energy still fills the histograms of the geometry
+    snapshot = store.statistics(SUBARRAY_ID, "dl2_stereo")
+    assert snapshot["accumulators"]["alt"]["n_entries"] == 3 and snapshot["accumulators"]["energy"]["n_entries"] == 2
+
+
+def test_dl2_containers(subarray):
+    """push_event: the DL2 containers of ctapipe, per telescope and stereo"""
+    import astropy.units as u
+    from ctapipe.containers import (
+        ArrayEventContainer,
+        ParticleClassificationContainer,
+        ReconstructedEnergyContainer,
+        ReconstructedGeometryContainer,
+        TelescopeImpactParameterContainer,
+    )
+
+    from sst1mpipe_viewer.dl2 import SUBARRAY_ID
+
+    event = ArrayEventContainer()
+    event.index.obs_id, event.index.event_id = 1, 5
+    event.dl2.tel[1].energy["RF"] = ReconstructedEnergyContainer(energy=2 * u.TeV, is_valid=True)
+    event.dl2.tel[1].particle_type["Classifier"] = ParticleClassificationContainer(prediction=0.7, is_valid=True)
+    event.dl2.tel[1].impact["Hillas"] = TelescopeImpactParameterContainer(distance=120 * u.m)
+    event.dl2.stereo.geometry["Hillas"] = ReconstructedGeometryContainer(
+        alt=70 * u.deg, az=20 * u.deg, core_x=10 * u.m, core_y=-5 * u.m, is_valid=True, telescopes=[1, 2])
+    store = ViewerStore(subarray)
+    store.push_event(event)
+    row = store.event(1, (1, 5))["dl2"]
+    assert row["RF_tel_energy"] == 2.0 and row["Classifier_tel_prediction"] == 0.7
+    assert row["Hillas_tel_impact_distance"] == 120.0
+    assert store.algorithms(1) == {"energy": ["RF"], "classification": ["Classifier"], "impact": ["Hillas"]}
+    stereo = store.event(SUBARRAY_ID, (1, 5))["dl2_stereo"]
+    assert stereo["Hillas_core_x"] == 10.0 and list(stereo["Hillas_telescopes"]) == [1, 2]
+    assert store.statistics(SUBARRAY_ID, "dl2_stereo")["accumulators"]["core"]["n_entries"] == 1
 
 
 def test_rate_history(subarray, monkeypatch):

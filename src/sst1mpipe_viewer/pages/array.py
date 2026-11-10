@@ -8,7 +8,7 @@ from bokeh.models import CheckboxGroup, ColumnDataSource, DataTable, Div, RadioB
 
 from ..components import ArrayMapPanel, ArrayPanel, RatePanel
 from ..components.array import earth_locations
-from ..store import KINDS
+from ..store import TELESCOPE_KINDS as KINDS
 from .base import LEVEL_NAMES, Page, message_div
 from .pixel_selection import PixelSelectionPanel
 

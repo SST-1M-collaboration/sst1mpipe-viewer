@@ -18,6 +18,7 @@ from astropy.table import join
 from ctapipe.instrument import SubarrayDescription
 from ctapipe.io import read_table
 
+from .dl2 import SUBARRAY_ID
 from .dl3 import read_dl3
 from .normalize import iter_rows, to_columns
 
@@ -36,7 +37,9 @@ TELESCOPE_TABLES = (
 )
 
 #: DL2 tables of ctapipe, ``/dl2/event/telescope/<group>/<algorithm>/tel_XXX``
-DL2_GROUPS = ("energy", "classification", "geometry")
+DL2_GROUPS = ("geometry", "energy", "classification", "particle_type", "impact", "disp")
+#: stereo DL2 tables of ctapipe, ``/dl2/event/subarray/<group>/<algorithm>``
+STEREO_KEYS = ["obs_id", "event_id"]
 
 
 def read_tables(path, tel_ids=None):
@@ -55,7 +58,9 @@ def read_tables(path, tel_ids=None):
     dict
         ``{(kind, tel_id): astropy table}`` of the R0, R1, DL0, DL1 and DL2 data and of the
         telescope triggers. The DL1 images and parameters of an event are joined, and the DL2
-        tables of ctapipe (energy, classification, geometry of each algorithm).
+        tables of ctapipe (geometry, energy, classification, impact, disp of each algorithm).
+        The stereo DL2 tables are joined in ``("dl2_stereo", SUBARRAY_ID)``, with the subarray
+        trigger (the times of the events) in ``("trigger", SUBARRAY_ID)``.
     """
     with tables.open_file(path) as h5file:
         paths = {node._v_pathname for node in h5file.walk_nodes("/", "Table")}
@@ -82,6 +87,18 @@ def read_tables(path, tel_ids=None):
         trigger = read_table(path, "/dl1/event/telescope/trigger")
         for tel_id in sorted(file_tel_ids):
             result[("trigger", tel_id)] = trigger[trigger["tel_id"] == tel_id]
+    stereo = None
+    for p in sorted(paths):
+        parts = p.split("/")  # "", "dl2", "event", "subarray", group, algorithm
+        if len(parts) == 6 and p.startswith("/dl2/event/subarray/") and parts[4] in DL2_GROUPS:
+            other = read_table(path, p)
+            stereo = other if stereo is None else join(stereo, other, keys=STEREO_KEYS)
+    if stereo is not None:
+        result[("dl2_stereo", SUBARRAY_ID)] = stereo
+        if "/dl1/event/subarray/trigger" in paths:
+            trigger = read_table(path, "/dl1/event/subarray/trigger")
+            trigger["tel_id"] = SUBARRAY_ID
+            result[("trigger", SUBARRAY_ID)] = trigger
     return result
 
 
