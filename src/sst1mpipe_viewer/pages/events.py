@@ -13,7 +13,7 @@ from bokeh.models import CheckboxGroup, Div, Select
 from ..components import FieldsTable
 from ..frames import source_telescope_frame
 from ..validity import row_is_valid
-from .base import LevelRates, Page, event_description, message_div, set_stale, stale_message, telescope_header
+from .base import LevelRates, Page, event_description, message_div, missing_message, telescope_header
 from .waveforms import field_shapes, set_options
 
 __all__ = ["ImageEventPage"]
@@ -33,14 +33,10 @@ class _TelescopeImage:
         self.layout = column(row(self.header, self.message), self.camera.layout)
         self.shown = False  # an event is displayed
 
-    def show_status(self, message, stale=False):
-        """
-        Show a message above the camera (None for none) and blur the camera if it is ``stale``:
-        its image is that of another event than the current one
-        """
+    def show_message(self, message):
+        """Show a message above the camera, None for none (only sent to the browser if it changed)"""
         if self.message.text != (message or ""):
             self.message.text = message or ""
-        set_stale(self.camera.layout, stale)
 
 
 class ImageEventPage(Page):
@@ -139,29 +135,24 @@ class ImageEventPage(Page):
         """Show the event of a telescope in its camera"""
         session = self.session
         camera = view.camera
-        level = self.kind.upper()
-        message = stale_message(session, tel_id, self.kind, key, data is not None)
         if geometry is None:
             view.shown = False
-            view.show_status("No camera geometry (no subarray).")
+            view.show_message("No camera geometry (no subarray).")
             camera.clear()
             return
-        if data is None:
-            if view.shown:
-                # the image of the last event shown is kept, blurred: it is not that of the current event
-                view.show_status(message + " The image is that of another event.", stale=True)
-            else:
-                view.show_status(message)
-                camera.clear()
+        if data is None or not row_is_valid(self.kind, data):
+            if session.follow and view.shown:
+                return  # Live: the last valid event displayed is kept until the next valid one
+            # a level which is not valid is not displayed
+            view.shown = False
+            view.show_message(missing_message(session, tel_id, self.kind))
+            camera.clear()
+            camera.set_caption("")
             return
         view.shown = True
         image = rows.get("dl1", {})
         name = self.pixel_field.value
-        if message is None and not row_is_valid(self.kind, data):
-            message = f"The {level} of this event is not valid (it is not counted in the rate)."
-        elif message is None and name not in image:
-            message = "No DL1 image of this event (its fields are in the table)."
-        view.show_status(message, stale=key != session.current_key(tel_id))
+        view.show_message(None if name in image else "No DL1 image of this event (its fields are in the table).")
         camera.set_caption(event_description(key, rows))
         camera.set_geometry(geometry)
         camera.set_title(name)

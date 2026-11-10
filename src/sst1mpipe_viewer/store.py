@@ -57,7 +57,7 @@ from .dl2 import (
 )
 from .dl3 import DL3Data
 from .frames import CAMERA_FRAME_PREFIX, add_telescope_frame_parameters
-from .normalize import KEY_COLUMNS, n_rows, to_columns
+from .normalize import KEY_COLUMNS, n_rows, to_columns, to_row
 from .rates import RATE_BIN, binned_rates, live_rates
 from .validity import container_is_valid, row_is_valid, valid_rows
 
@@ -285,7 +285,7 @@ class ViewerStore:
         if kind in LAZY_KINDS and obs_id is not None and event_id is not None and tel_id is not None:
             self._push_lazy(kind, container, dict(obs_id=int(obs_id), event_id=int(event_id), tel_id=int(tel_id)))
             return
-        self._push_event_rows(kind, to_columns(container, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
+        self._push_event_row(kind, to_row(container, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
 
     def push_row(self, kind, row, *, obs_id=None, event_id=None, tel_id=None):
         """
@@ -293,7 +293,7 @@ class ViewerStore:
         (``"dl2_stereo"``) need no ``tel_id``.
         """
         tel_id = SUBARRAY_ID if kind == "dl2_stereo" else tel_id
-        self._push_event_rows(kind, to_columns(row, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
+        self._push_event_row(kind, to_row(row, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
 
     def push_event(self, event, tel_ids=None, stereo=True):
         """
@@ -313,9 +313,9 @@ class ViewerStore:
         # the trigger first: it has the time of the event, used to count its levels in the rates
         for tel_id, container in event.trigger.tel.items():
             if wanted is None or tel_id in wanted:
-                columns = to_columns(container, tel_id=tel_id, **keys)
-                columns.update(to_columns({"event_type": event.trigger.event_type}))
-                self._push_event_rows("trigger", columns)
+                row = to_row(container, tel_id=tel_id, **keys)
+                row.update(to_row({"event_type": event.trigger.event_type}))
+                self._push_event_row("trigger", row)
         for kind in ("r0", "r1", "dl0", "dl1"):
             for tel_id, container in getattr(event, kind).tel.items():
                 if wanted is None or tel_id in wanted:
@@ -463,6 +463,40 @@ class ViewerStore:
             if container_is_valid(kind, container):
                 self._count_valid(tel_id, key, kind, _unix_time(getattr(container, "event_time", None)))
             self._count(tel_id, kind, 1, now)
+            self.version += 1
+
+    def _push_event_row(self, kind, row):
+        """
+        A row pushed event by event (the fast path of `_push_event_rows` for a single row): kept
+        in the last events, counted in the rates if valid, DL1 / DL2 rows buffered for the statistics
+        """
+        if kind not in KINDS:
+            raise ValueError(f"Unknown kind {kind!r}, known: {KINDS}")
+        missing = [name for name in KEY_COLUMNS if name not in row]
+        if missing:
+            raise ValueError(f"Missing columns {missing} in the {kind} data (or give them as keywords)")
+        if kind == "dl2":
+            row = add_sst1mpipe_algorithm(row)
+        now = time.monotonic()
+        tel_id, key = int(row["tel_id"]), (int(row["obs_id"]), int(row["event_id"]))
+        with self._lock:
+            merged = self._keep_event(tel_id, key, kind, row)
+            if row_is_valid(kind, merged):
+                event_time = next((_unix_time(merged[name]) for name in TIME_COLUMNS if name in merged), None)
+                self._count_valid(tel_id, key, kind, event_time)
+            self._count(tel_id, kind, 1, now)
+            if kind in STATISTICS_KINDS:
+                # the statistics are filled later, in batches: only the columns they use are kept
+                if kind in DL2_KINDS:
+                    kept = {name: np.asarray(value)[np.newaxis] for name, value in row.items() if np.ndim(value) == 0}
+                else:
+                    needed = self._needed(kind)
+                    kept = {name: np.asarray(value)[np.newaxis] for name, value in row.items()
+                            if name in needed or name.startswith(CAMERA_FRAME_PREFIX)}
+                self._pending.setdefault((kind, tel_id), []).append(kept)
+                self._n_pending += 1
+                if self._n_pending >= self.flush_size:
+                    self._flush()
             self.version += 1
 
     def _push_event_rows(self, kind, columns):

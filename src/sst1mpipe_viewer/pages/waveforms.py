@@ -6,7 +6,7 @@ from bokeh.models import Div, Select, Slider
 
 from ..components import FieldsTable, WaveformPanel
 from ..components.waveform import waveform_2d
-from .base import LevelRates, Page, event_description, message_div, set_stale, stale_message, telescope_header
+from .base import LevelRates, Page, event_description, message_div, missing_message, telescope_header
 from .trigger import TRACE_FIELDS, TriggerView, trace_fields
 
 __all__ = ["WaveformPage", "field_shapes", "sample_image"]
@@ -86,9 +86,7 @@ class _TelescopeWaveforms:
         rows = [row(self.camera.layout, self.waveforms.layout, self.field_camera.layout)]
         if self.trigger is not None:
             rows.append(row(self.trigger.layout, self.trigger.traces.layout))
-        # the displays are blurred when they are not those of the current event (`show_status`)
-        self.displays = column(*rows)
-        self.layout = column(row(self.header, self.sample, self.message), self.displays)
+        self.layout = column(row(self.header, self.sample, self.message), *rows)
         self.shown = False  # an event is displayed
 
     def set_sample_range(self, n_samples):
@@ -99,19 +97,15 @@ class _TelescopeWaveforms:
             if self.sample.value > end:
                 self.sample.value = end
 
-    def show_status(self, message, stale=False):
-        """
-        Show a message above the displays (None for none) and blur the displays if they are
-        ``stale``: those of another event than the current one
-        """
+    def show_message(self, message):
+        """Show a message above the displays, None for none (only sent to the browser if it changed)"""
         if self.message.text != (message or ""):
             self.message.text = message or ""
-        set_stale(self.displays, stale)
 
     def clear(self, message):
         """Show no event, with a message (e.g. why there is no data)"""
         self.shown = False
-        self.show_status(message)
+        self.show_message(message)
         self.camera.clear()
         self.field_camera.clear()
         self.waveforms.clear()
@@ -242,17 +236,16 @@ class WaveformPage(Page):
         table = {}
         for tel_id, (key, rows, data, geometry, shapes) in events.items():
             view = self.views[tel_id]
-            has_data = tel_id in shown
-            message = stale_message(session, tel_id, self.kind, key, has_data)
-            if has_data:
+            if tel_id in shown:
                 view.update(key, rows, data, geometry)
+                view.show_message(None)
                 table[tel_id] = {self.kind: data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
-                view.show_status(message, stale=message is not None)
             elif geometry is None:
                 view.clear("No camera geometry (no subarray).")
-            elif view.shown:
-                # the displays of the last event shown are kept, blurred: they are not those of the current event
-                view.show_status(message + " The displays are those of another event.", stale=True)
+            elif session.follow and view.shown:
+                # Live: the last valid event displayed is kept until the next valid one
+                continue
             else:
-                view.clear(message)
+                # a level which is not valid is not displayed
+                view.clear(missing_message(session, tel_id, self.kind))
         self.fields.set_rows(table)

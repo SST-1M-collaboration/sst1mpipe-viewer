@@ -23,7 +23,7 @@ from astropy.table import Row, Table
 from astropy.time import Time
 from ctapipe.core import Container
 
-__all__ = ["CANONICAL_UNITS", "KEY_COLUMNS", "container_to_dict", "to_columns", "n_rows", "iter_rows"]
+__all__ = ["CANONICAL_UNITS", "KEY_COLUMNS", "container_to_dict", "to_columns", "to_row", "n_rows", "iter_rows"]
 
 #: columns identifying an event of a telescope
 KEY_COLUMNS = ("obs_id", "event_id", "tel_id")
@@ -87,6 +87,33 @@ def container_to_dict(container):
         else:
             result[key] = value
     return result
+
+
+def to_row(data, **extra):
+    """
+    A single row ``{name: value}`` of ``data``: a ctapipe `~ctapipe.core.Container`, a mapping
+    ``{name: value}`` or an astropy `~astropy.table.Row`. The values are converted as by
+    `to_columns` (numbers and arrays in the canonical units), without the cost of building
+    columns: this is the fast path of the rows pushed one by one.
+
+    The ``extra`` values (e.g. ``tel_id=1``) are added to the row. ``None`` values are dropped.
+    """
+    if isinstance(data, Container):
+        data = container_to_dict(data)
+    elif isinstance(data, Row):
+        data = {name: data[name] for name in data.colnames}
+    elif not isinstance(data, Mapping):
+        raise TypeError(f"Cannot convert {type(data).__name__} to a row")
+    row = {}
+    for name, value in data.items():
+        if value is not None:
+            value = _to_value(value)
+            # a single value is a numpy scalar (or the object itself, e.g. a time), not a 0-d array
+            row[name] = value[()] if value.ndim == 0 else value
+    for name, value in extra.items():
+        if value is not None:
+            row[name] = value
+    return row
 
 
 def to_columns(data, **extra):

@@ -7,58 +7,21 @@ from ctapipe.containers import EventType
 
 from ..components import RatePanel
 
-__all__ = ["Page", "LevelRates", "message_div", "event_description", "telescope_header", "set_stale",
-           "stale_message"]
+__all__ = ["Page", "LevelRates", "message_div", "event_description", "telescope_header", "missing_message"]
 
 #: names of the data levels in the titles
 LEVEL_NAMES = {"r0": "R0", "r1": "R1", "dl0": "DL0", "dl1": "DL1", "dl2": "DL2", "dl2_stereo": "DL2 stereo",
                "trigger": "trigger"}
 
 
-#: style of the displays which do not show the current event: blurred and faded
-STALE_STYLES = {"filter": "blur(1.5px)", "opacity": "0.7"}
-
-
-def set_stale(layout, stale):
+def missing_message(session, tel_id, kind):
     """
-    Blur a layout whose displays are not those of the current event (``stale``), or show it
-    normally: the user sees at once that the displays are those of another event.
-    """
-    styles = STALE_STYLES if stale else {}
-    if dict(layout.styles) != styles:
-        layout.styles = styles
-
-
-def stale_message(session, tel_id, kind, key, has_data):
-    """
-    Explain why the displays of a telescope do not show its current event (its level ``kind`` is
-    missing or not valid, see `sst1mpipe_viewer.validity`).
-
-    Parameters
-    ----------
-    session : ViewerSession
-    tel_id : int
-    kind : str
-        The data level of the page.
-    key : tuple or None
-        The event whose data would be displayed.
-    has_data : bool
-        Whether this event has data of the level.
-
-    Returns
-    -------
-    str or None
-        None if the displays show the current event, else the message for the user.
+    Message shown instead of the displays of a telescope whose current event has no valid data of
+    the level ``kind`` (`sst1mpipe_viewer.validity`): a level which is not valid is never displayed.
     """
     current = session.current_key(tel_id)
     level = LEVEL_NAMES.get(kind, kind)
-    if has_data and key == current:
-        return None
-    if current is None:
-        return f"No {level} data."
-    if has_data:
-        return f"Event {current[1]} has no valid {level} data: event {key[1]} is shown."
-    return f"No {level} data in event {current[1]}."
+    return f"No valid {level} data." if current is None else f"No valid {level} data in event {current[1]}."
 
 
 def message_div(text="", width=900, height=28):

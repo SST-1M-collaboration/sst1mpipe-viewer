@@ -46,10 +46,9 @@ from the timestamps of the events (trigger `time` or `event_time`; the events wi
 are not counted), with error bars for the statistical uncertainty (√N / duration). A dashed
 vertical line marks the time of the displayed event of each telescope.
 
-**Blurred displays.** In Live mode a page shows the last event whose level is valid. When this is
-not the current event of the telescope (e.g. the last event has no R1, or its DL1 has no Hillas
-parameters), or when browsing an event without this level, the last displays are kept **blurred**
-with a message: what is shown is not the current event.
+**Only valid levels are displayed.** In Live mode a page shows the last event whose level is
+valid, and keeps it until the next valid one. When browsing, an event whose level is missing or
+not valid is not displayed (a message says so).
 
 The color maps are not chosen in the pages (lighter pages) but on the command line: `--colormap`
 (waveform and image cameras), `--field-colormap` (per-pixel fields), `--color-scale lin|log`.
