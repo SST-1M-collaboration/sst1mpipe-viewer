@@ -19,13 +19,12 @@ import numpy as np
 from astropy.table import Table
 
 from .config import build_statistics, load_statistics_config
+from .rates import binned_rates
 
 __all__ = ["DL3Data", "read_dl3", "target_offsets", "unix_times"]
 
 #: MJD of the origin of the unix times
 UNIX_MJD = 40587.0
-#: maximum number of bins of the rate of the events in time
-MAX_RATE_BINS = 500
 
 
 def read_dl3(path):
@@ -104,7 +103,7 @@ class DL3Data:
         self._statistics = build_statistics(self.config, n_pixels=0)
         self._observations = {}  # obs_id -> summary (dict)
         self._times = []  # unix times of the events, one array per push
-        self._rates = None  # cached (times, rates)
+        self._rates = None  # cached (times, rates, errors)
 
     def push(self, events, header=None):
         """
@@ -166,10 +165,13 @@ class DL3Data:
             return self._statistics.snapshot()
 
     def rate_history(self):
-        """Rate of the events in time: (start of the bins in unix s, events per second)"""
+        """
+        Rate of the events in time, per minute: (centre of the bins in unix s, events per second,
+        statistical uncertainties), see `sst1mpipe_viewer.rates`
+        """
         with self._lock:
             if self._rates is None:
-                self._rates = _rates(np.concatenate(self._times) if self._times else np.empty(0))
+                self._rates = binned_rates(np.concatenate(self._times) if self._times else np.empty(0))
             return self._rates
 
     def reset(self, name=None):
@@ -202,14 +204,3 @@ def _target(header):
     """Position (ra, dec) of the target of an observation: its object, else its pointing, else None"""
     return _position(header, "RA_OBJ", "DEC_OBJ") or _position(header, "RA_PNT", "DEC_PNT")
 
-
-def _rates(times):
-    """Events per second in at most `MAX_RATE_BINS` bins of time: (start of the bins, rates)"""
-    times = times[np.isfinite(times)]
-    if len(times) == 0:
-        return np.empty(0), np.empty(0)
-    start, stop = float(times.min()), float(times.max())
-    n_bins = int(min(MAX_RATE_BINS, max(1, np.sqrt(len(times)))))
-    edges = np.linspace(start, max(stop, start + 1.0), n_bins + 1)
-    counts, _ = np.histogram(times, bins=edges)
-    return edges[:-1], counts / np.diff(edges)

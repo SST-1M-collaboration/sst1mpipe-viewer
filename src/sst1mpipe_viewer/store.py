@@ -29,8 +29,9 @@ image row and a DL1 parameter row, or a R1 row and its trigger row.
 Rates
 -----
 The number of rows received per second is kept for each telescope and data level
-(`rate_history`): by time of arrival for the rows pushed event by event (the last hour), by time
-of the events for the tables (the trigger time of their events).
+(`rate_history`), per minute with its statistical uncertainty (`sst1mpipe_viewer.rates`): by time
+of arrival for the rows pushed event by event (the last 24 hours), by time of the events for the
+tables (the trigger time of their events).
 """
 
 import threading
@@ -39,6 +40,7 @@ from collections import Counter, OrderedDict, deque
 
 import astropy.units as u
 import numpy as np
+from astropy.time import Time
 from ctapipe.coordinates import GroundFrame
 from ctapipe.instrument import SubarrayDescription
 
@@ -48,6 +50,7 @@ from .dl2 import add_dl2_aliases
 from .dl3 import DL3Data
 from .frames import CAMERA_FRAME_PREFIX, add_telescope_frame_parameters
 from .normalize import KEY_COLUMNS, n_rows, to_columns
+from .rates import RATE_BIN, binned_rates, live_rates
 
 __all__ = ["KINDS", "ViewerStore"]
 
@@ -56,11 +59,8 @@ KINDS = ("r0", "r1", "dl0", "dl1", "dl2", "trigger")
 
 #: time window (s) of the rates of received rows
 RATE_WINDOW = 10.0
-#: duration (s) of the bins of the rate histories, and their number for the live data (1 hour)
-RATE_BIN = 1.0
-RATE_HISTORY_BINS = 3600
-#: maximum number of bins of the rate history of tables (the bins are longer for long files)
-MAX_TABLE_RATE_BINS = 2000
+#: number of bins (minutes) of the rate histories of the live data: 24 hours
+RATE_HISTORY_BINS = 1440
 #: number of rows converted to the telescope frame kept for the display
 CONVERTED_CACHE_SIZE = 64
 #: columns with the time of the events (unix seconds in the tables)
@@ -211,8 +211,9 @@ class ViewerStore:
         self._latest = {}  # (tel_id, kind) -> (obs_id, event_id)
         self._counts = Counter()  # (tel_id, kind) -> number of rows received
         self._arrivals = {}  # (tel_id, kind) -> deque of [time, n rows] of the last RATE_WINDOW s
-        self._history = {}  # (tel_id, kind) -> deque of [second (unix), n rows] of the last hour
-        self._table_history = {}  # (tel_id, kind) -> (tables version, (times, rates)), cache
+        self._history = {}  # (tel_id, kind) -> {minute (unix time // RATE_BIN): n rows received}
+        self._history_start = {}  # (tel_id, kind) -> time of arrival of the first row (unix s)
+        self._table_history = {}  # (tel_id, kind) -> (tables version, (times, rates, errors)), cache
         self._statistics = {}  # (kind, tel_id) -> StatisticsSet
         self._pending = {}  # (kind, tel_id) -> list of columns not yet in the statistics
         self._n_pending = 0
@@ -351,12 +352,14 @@ class ViewerStore:
         while arrivals and arrivals[0][0] < now - RATE_WINDOW:
             arrivals.popleft()
         if history:
-            second = int(time.time() // RATE_BIN)
-            bins = self._history.setdefault((tel_id, kind), deque(maxlen=RATE_HISTORY_BINS))
-            if bins and bins[-1][0] == second:
-                bins[-1][1] += n
-            else:
-                bins.append([second, n])
+            arrival = time.time()
+            minute = int(arrival // RATE_BIN)
+            bins = self._history.setdefault((tel_id, kind), {})
+            self._history_start.setdefault((tel_id, kind), arrival)
+            bins[minute] = bins.get(minute, 0) + n
+            if len(bins) > 2 * RATE_HISTORY_BINS:  # forget the old minutes
+                for old in sorted(bins)[:-RATE_HISTORY_BINS]:
+                    del bins[old]
 
     def _keep_event(self, tel_id, key, kind, row):
         """Keep a row (or a `_LazyRow`) of a pushed event, in the last events of the telescope"""
@@ -591,32 +594,57 @@ class ViewerStore:
 
     def rate_history(self, tel_id, kind):
         """
-        Number of rows of a telescope and data level received per second, in time.
+        Rate of the rows of a telescope and data level in time, per minute.
 
-        The rows pushed event by event are counted by time of arrival (the last hour, the current
-        second excluded: it is not complete); the rows of tables by time of their events (the
-        tables of the event times, e.g. the trigger table, are needed).
+        The rows pushed event by event are counted by time of arrival (the last 24 hours, up to
+        now); the rows of tables by time of their events (a table with the event times, e.g. the
+        trigger table, is needed).
 
         Returns
         -------
-        times, rates : numpy arrays
-            Start of the bins (unix s) and rates (rows per second) in the bins.
+        times, rates, errors : numpy arrays
+            Centre of the bins (unix s), rates (rows per second) and their statistical
+            uncertainties (see `sst1mpipe_viewer.rates`).
         """
         with self._lock:
             bins = self._history.get((tel_id, kind))
             if bins:
-                current = int(time.time() // RATE_BIN)
-                complete = [b for b in bins if b[0] < current]
-                times = np.array([b[0] * RATE_BIN for b in complete], dtype=float)
-                return times, np.array([b[1] / RATE_BIN for b in complete], dtype=float)
+                return live_rates(bins, self._history_start[(tel_id, kind)], time.time(),
+                                  max_bins=RATE_HISTORY_BINS)
             tables = self._tables.get(tel_id)
             if tables is None:
-                return np.empty(0), np.empty(0)
+                return binned_rates(np.empty(0))
             cached = self._table_history.get((tel_id, kind))
             if cached is None or cached[0] != tables.version:
-                cached = (tables.version, _histogram_rates(tables.event_times(kind)))
+                cached = (tables.version, binned_rates(tables.event_times(kind)))
                 self._table_history[(tel_id, kind)] = cached
             return cached[1]
+
+    def event_time(self, tel_id, key):
+        """
+        Time of an event of a telescope (unix s), None if unknown: from the tables, or from the
+        rows of the event pushed (``time`` of the trigger, ``event_time`` of the R0 / R1 / DL0).
+        """
+        if key is None:
+            return None
+        with self._lock:
+            tables = self._tables.get(tel_id)
+            value = tables.times.get(key) if tables is not None else None
+            if value is None:
+                for row in self._events.get(tel_id, {}).get(key, {}).values():
+                    row = _as_row(row)
+                    value = next((row[name] for name in TIME_COLUMNS if name in row), None)
+                    if value is not None:
+                        break
+        if value is None:
+            return None
+        if isinstance(value, np.ndarray) and value.dtype == object:
+            value = value[()]
+        try:
+            value = float(value.unix) if isinstance(value, Time) else float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if np.isfinite(value) else None
 
     def statistics(self, tel_id, kind="dl1"):
         """Snapshot of the statistics of a data level of a telescope (see `StatisticsSet.snapshot`)"""
@@ -641,20 +669,6 @@ class ViewerStore:
             self._clear()
             self.version += 1
         self.dl3.reset()
-
-
-def _histogram_rates(times):
-    """Rates (per second) of events at ``times`` (unix s): (start of the bins, rates)"""
-    times = times[np.isfinite(times)]
-    if len(times) == 0:
-        return np.empty(0), np.empty(0)
-    start = np.floor(times.min() / RATE_BIN) * RATE_BIN
-    span = times.max() - start
-    # bins of RATE_BIN, longer for a long file
-    width = RATE_BIN * max(1, int(np.ceil(span / RATE_BIN / MAX_TABLE_RATE_BINS)))
-    edges = start + width * np.arange(int(span // width) + 2)
-    counts, _ = np.histogram(times, bins=edges)
-    return edges[:-1], counts / width
 
 
 def _telescope_dl2_row(reconstructed):

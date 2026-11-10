@@ -80,20 +80,28 @@ class Page:
 
 
 class LevelRates:
-    """Rates of the data of a level received from the selected telescopes, in time (one line per telescope)"""
+    """
+    Rates of the data of a level received from the selected telescopes, per minute (one line per
+    telescope, with error bars), and a dashed vertical line at the time of the displayed event of
+    each telescope
+    """
 
     def __init__(self, session, kind, width=1000, height=200):
         self.session, self.kind = session, kind
         series = {tel_id: (f"TEL {tel_id}", session.color(tel_id)) for tel_id in session.all_tel_ids}
-        self.panel = RatePanel(f"Rate of the {LEVEL_NAMES.get(kind, kind)} data received", series, width=width,
+        markers = {tel_id: session.color(tel_id) for tel_id in session.all_tel_ids}
+        self.panel = RatePanel(f"Rate of the {LEVEL_NAMES.get(kind, kind)} data per minute"
+                               " (dashed lines: displayed events)", series, markers=markers, width=width,
                                height=height)
         self.layout = self.panel.layout
 
     def refresh(self):
-        """Show the rates of the selected telescopes"""
-        tel_ids = self.session.tel_ids
-        store = self.session.store
+        """Show the rates of the selected telescopes and the times of their displayed events"""
+        session, store = self.session, self.session.store
+        tel_ids = session.tel_ids
         self.panel.update({tel_id: store.rate_history(tel_id, self.kind) for tel_id in tel_ids}, visible=tel_ids)
+        self.panel.set_markers({tel_id: store.event_time(tel_id, session.event_key(tel_id, self.kind))
+                                for tel_id in tel_ids})
 
 
 def telescope_header(session, tel_id):

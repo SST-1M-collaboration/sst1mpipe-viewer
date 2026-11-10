@@ -56,7 +56,8 @@ class DL3Page(Page):
             TableColumn(field="start", title="First event", width=150),
             TableColumn(field="stop", title="Last event", width=150),
         ])
-        self.rates = RatePanel("Rate of the DL3 events", {ALL: ("DL3 events", COLOR)}, width=1100, height=220)
+        self.rates = RatePanel("Rate of the DL3 events per minute", {ALL: ("DL3 events", COLOR)}, width=1100,
+                               height=220)
         self.hist1d = [
             Histogram1DPanel(
                 spec.get("name", spec["column"]), title=spec.get("title", spec["column"]),

@@ -77,8 +77,8 @@ def test_file_mode(subarray):
     assert statistics["accumulators"]["hillas_length"]["n_entries"] == 1000
     assert statistics["accumulators"]["image_mask_fraction"]["n_entries"] == 1000
     # rates in time of the events (trigger times of the file)
-    times, rates = store.rate_history(21, "dl1")
-    assert rates.sum() * (times[1] - times[0]) == 1000
+    times, rates, errors = store.rate_history(21, "dl1")
+    assert len(times) >= 1 and rates.max() > 100 and np.all(errors < rates)
     keys = store.event_keys(21)
     assert len(keys) == 1000
 

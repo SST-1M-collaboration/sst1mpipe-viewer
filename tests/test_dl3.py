@@ -44,8 +44,9 @@ def test_dl3_data():
     accumulators = data.statistics()["accumulators"]
     assert accumulators["energy"]["n_entries"] == 250
     assert accumulators["theta2"]["n_entries"] == 250 and accumulators["sky"]["counts"].sum() > 200
-    times, rates = data.rate_history()
-    assert np.isclose((rates * (times[1] - times[0])).sum(), 250)
+    times, rates, errors = data.rate_history()
+    assert len(times) == 3 and np.allclose(rates, 2.5, rtol=0.1)  # 250 events in 100 s, per minute
+    assert np.allclose(errors[1], np.sqrt(rates[1] * 60) / 60)
     data.reset("theta2")
     assert data.statistics()["accumulators"]["theta2"]["n_entries"] == 0 and data.observations()
     data.reset()

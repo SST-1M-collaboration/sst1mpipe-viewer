@@ -9,7 +9,8 @@ __all__ = ["RatePanel"]
 
 class RatePanel:
     """
-    Rates in time, one line per series (e.g. per telescope, or per data level).
+    Rates in time with their uncertainties (error bars), one line per series (e.g. per telescope,
+    or per data level), and vertical markers at chosen times (e.g. the time of the displayed event).
 
     Parameters
     ----------
@@ -17,14 +18,13 @@ class RatePanel:
         Title of the plot.
     series : dict
         ``{key: (label, color)}`` of the lines.
+    markers : dict or None
+        ``{key: color}`` of the vertical markers (dashed lines), placed with `set_markers`.
     width, height : int
         Size of the plot (pixels).
-
-    Use `update` with the rates of the series. A line whose rates only grew by new bins at the
-    end is updated by sending these bins only (``ColumnDataSource.stream``), not all its points.
     """
 
-    def __init__(self, title, series, width=1000, height=220):
+    def __init__(self, title, series, markers=None, width=1000, height=220):
         self.figure = figure(title=title, width=width, height=height, x_axis_type="datetime",
                              tools="pan,xwheel_zoom,box_zoom,reset,save", toolbar_location="above")
         self.figure.yaxis.axis_label = "rate (Hz)"
@@ -32,17 +32,27 @@ class RatePanel:
         self.sources, self.renderers = {}, {}
         items = []
         for key, (label, color) in series.items():
-            source = ColumnDataSource(data=dict(time=[], rate=[]))
-            line = self.figure.line(x="time", y="rate", source=source, line_color=color, line_width=2)
-            # markers: a series of a single bin is visible
-            dots = self.figure.scatter(x="time", y="rate", source=source, color=color, size=4)
-            self.sources[key], self.renderers[key] = source, (line, dots)
-            items.append(LegendItem(label=label, renderers=[line, dots]))
+            source = ColumnDataSource(data=dict(time=[], rate=[], error=[], lower=[], upper=[]))
+            line = self.figure.line(x="time", y="rate", source=source, line_color=color, line_width=1.5)
+            dots = self.figure.scatter(x="time", y="rate", source=source, color=color, size=5)
+            # error bars: statistical uncertainty of the rate of each bin
+            bars = self.figure.segment(x0="time", y0="lower", x1="time", y1="upper", source=source,
+                                       line_color=color, line_width=1.5)
+            self.sources[key], self.renderers[key] = source, (line, dots, bars)
+            items.append(LegendItem(label=label, renderers=[line, dots, bars]))
         self.figure.add_layout(Legend(items=items, location="top_left", click_policy="hide",
                                       orientation="horizontal", background_fill_alpha=0.6))
-        lines = [line for line, _ in self.renderers.values()]
-        self.figure.add_tools(HoverTool(renderers=lines, tooltips=[("time", "@time{%F %T}"), ("rate", "@rate{0.0} Hz")],
-                                        formatters={"@time": "datetime"}, mode="vline"))
+        dots = [renderers[1] for renderers in self.renderers.values()]
+        self.figure.add_tools(HoverTool(
+            renderers=dots, formatters={"@time": "datetime"},
+            tooltips=[("time", "@time{%F %T}"), ("rate", "@rate{0.00} ± @error{0.00} Hz")],
+        ))
+        # vertical lines (glyphs, not annotations: the time axis is extended to show them)
+        self.markers = {}
+        for key, color in (markers or {}).items():
+            source = ColumnDataSource(data=dict(x=[]))
+            self.figure.vspan(x="x", source=source, line_color=color, line_dash="dashed", line_width=2)
+            self.markers[key] = source
         self.layout = self.figure
 
     def update(self, histories, visible=None):
@@ -52,7 +62,8 @@ class RatePanel:
         Parameters
         ----------
         histories : dict
-            ``{key: (times, rates)}``: start of the bins (unix s) and rates (Hz) of the series.
+            ``{key: (times, rates, errors)}``: centre of the bins (unix s), rates (Hz) and their
+            uncertainties, for each series.
         visible : iterable or None
             Keys of the series shown (all if None).
         """
@@ -63,15 +74,25 @@ class RatePanel:
                     renderer.visible = shown
             if not shown or key not in histories:
                 continue
-            times, rates = histories[key]
-            times_ms = np.asarray(times, dtype=float) * 1000.0  # bokeh datetimes are in ms
-            old = source.data["time"]
-            if (len(old) and len(times_ms) == len(old) and times_ms[-1] == old[-1]
-                    and np.array_equal(rates, source.data["rate"])):
+            times, rates, errors = (np.asarray(values, dtype=float) for values in histories[key])
+            times_ms = times * 1000.0  # bokeh datetimes are in ms
+            old = source.data
+            if np.array_equal(times_ms, old["time"]) and np.array_equal(rates, old["rate"]):
                 continue  # nothing new
-            if len(old) and len(times_ms) and times_ms[0] <= old[-1] < times_ms[-1]:
-                # new bins at the end: only these are sent
-                new = times_ms > old[-1]
-                source.stream(dict(time=times_ms[new], rate=np.asarray(rates)[new]), rollover=len(times_ms))
-            else:
-                source.data = dict(time=times_ms, rate=np.asarray(rates, dtype=float))
+            source.data = dict(time=times_ms, rate=rates, error=errors, lower=np.maximum(rates - errors, 0.0),
+                               upper=rates + errors)
+
+    def set_markers(self, times):
+        """
+        Place the vertical markers.
+
+        Parameters
+        ----------
+        times : dict
+            ``{key: time in unix s}``; the markers of the other keys, or with a None time, are hidden.
+        """
+        for key, source in self.markers.items():
+            value = times.get(key)
+            x = [] if value is None else [value * 1000.0]
+            if list(source.data["x"]) != x:
+                source.data = dict(x=x)

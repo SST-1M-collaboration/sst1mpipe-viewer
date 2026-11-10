@@ -72,7 +72,8 @@ class ArrayPage(Page):
         series = {kind: (LEVEL_NAMES[kind], LEVEL_COLORS[kind]) for kind in KINDS}
         self.rate_panels = {}
         for tel_id in all_tel_ids:
-            panel = RatePanel(f"Rates of TEL {tel_id}", series, width=1100, height=200)
+            panel = RatePanel(f"Rates of TEL {tel_id} per minute (dashed line: displayed event)", series,
+                              markers={"event": "black"}, width=1100, height=200)
             panel.figure.title.text_color = session.color(tel_id)
             self.rate_panels[tel_id] = panel
         self.rates_container = column()
@@ -160,6 +161,8 @@ class ArrayPage(Page):
         for tel_id in selected_tels:
             if tel_id in self.rate_panels:
                 self.rate_panels[tel_id].update({kind: self.store.rate_history(tel_id, kind) for kind in KINDS})
+                event_time = self.store.event_time(tel_id, self.session.event_key(tel_id))
+                self.rate_panels[tel_id].set_markers({"event": event_time})
         for tel_id in selected_tels:
             self.pixel_selections[tel_id].refresh()
         active = sorted({tel for (tel, _), rate in rates.items() if rate > 0})

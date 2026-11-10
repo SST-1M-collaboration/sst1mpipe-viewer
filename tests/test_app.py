@@ -1,6 +1,7 @@
 """The pages are built and refreshed without browser"""
 
 import numpy as np
+from astropy.table import Table
 from bokeh.document import Document
 from bokeh.events import Tap
 from conftest import Browser, dl1_row, r1_row
@@ -262,14 +263,32 @@ def test_dl2_pages(subarray):
 
 
 def test_rate_panel():
-    """New bins are streamed, not all the points sent again"""
+    """Rates with error bars, markers of the displayed events"""
     from sst1mpipe_viewer.components import RatePanel
 
-    panel = RatePanel("rates", {"a": ("A", "red")})
-    panel.update({"a": (np.array([1.0, 2.0]), np.array([5.0, 6.0]))})
+    panel = RatePanel("rates", {"a": ("A", "red")}, markers={"a": "red"})
+    panel.update({"a": (np.array([1.0, 2.0]), np.array([5.0, 6.0]), np.array([1.0, 7.0]))})
     source = panel.sources["a"]
     assert list(source.data["time"]) == [1000.0, 2000.0]
-    panel.update({"a": (np.array([1.0, 2.0, 3.0]), np.array([5.0, 6.0, 7.0]))})
-    assert list(source.data["rate"]) == [5.0, 6.0, 7.0]
-    panel.update({"a": (np.array([1.0, 2.0, 3.0]), np.array([5.0, 6.0, 7.0]))}, visible=[])
+    assert list(source.data["lower"]) == [4.0, 0.0] and list(source.data["upper"]) == [6.0, 13.0]
+    panel.set_markers({"a": 1.5})
+    assert panel.markers["a"].data["x"] == [1500.0]
+    panel.set_markers({})
+    assert panel.markers["a"].data["x"] == []
+    panel.update({}, visible=[])
     assert not any(r.visible for r in panel.renderers["a"])
+
+
+def test_displayed_event_marker(subarray):
+    """The rate plot of a level has a vertical line at the time of the displayed event of each telescope"""
+    store = ViewerStore(subarray)
+    store.push_table("dl1", Table(rows=[dl1_row(i) for i in range(3)]))
+    store.push_table("trigger", Table(dict(obs_id=[1] * 3, event_id=[0, 1, 2], tel_id=[1] * 3,
+                                           time=[100.0, 130.0, 150.0])))
+    session = Browser(store)
+    refresh_all(session)
+    page = session.pages[4]
+    assert page.rates.panel.markers[1].data["x"] == [100e3]
+    session.step(+1, [1])
+    page.refresh()
+    assert page.rates.panel.markers[1].data["x"] == [130e3] and page.rates.panel.markers[2].data["x"] == []

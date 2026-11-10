@@ -36,8 +36,10 @@ header:
   a telescope name: of this telescope only);
 - **Event id**: an `event_id`, or `#index` for the index of the event (`#0` the first, `#-1` the last).
 
-The rates are counted per second: by time of arrival for the data pushed event by event (the last
-hour), by time of the events for a file (the trigger times of its events).
+The rates are shown per minute, with error bars for their statistical uncertainty (√N / duration):
+by time of arrival for the data pushed event by event (the last 24 hours, the current minute
+included), by time of the events for a file (the trigger times of its events). A dashed vertical
+line marks the time of the displayed event of each telescope.
 
 The color maps are not chosen in the pages (lighter pages) but on the command line: `--colormap`
 (waveform and image cameras), `--field-colormap` (per-pixel fields), `--color-scale lin|log`.
