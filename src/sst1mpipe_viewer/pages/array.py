@@ -1,10 +1,10 @@
 """
-Array page: welcome text, selection of the telescopes, telescope positions (map), data received
-and their rates, selection of the pixels of each telescope.
+Array page: welcome text, selection of the telescopes, telescope positions (map), rates of the
+data levels of each telescope, selection of the pixels of each telescope.
 """
 
 from bokeh.layouts import column, row
-from bokeh.models import CheckboxGroup, ColumnDataSource, DataTable, Div, RadioButtonGroup, TableColumn
+from bokeh.models import CheckboxGroup, Div, RadioButtonGroup
 
 from ..components import ArrayMapPanel, ArrayPanel, RatePanel
 from ..components.array import earth_locations
@@ -39,7 +39,7 @@ groups of pixels below; each telescope has its own selection, shared by all the 
 
 
 class ArrayPage(Page):
-    """The array of telescopes, the selection of the telescopes and of the pixels, the data received"""
+    """The array of telescopes, the selection of the telescopes and of the pixels, the rates of the data levels"""
 
     title = "Array"
 
@@ -48,16 +48,6 @@ class ArrayPage(Page):
         self._subarray = None
         self.array_panels = {}
         self.message = message_div("No subarray description: the telescope positions are unknown.")
-        self.summary_source = ColumnDataSource(data=self._summary({}, {}))
-        columns = [
-            TableColumn(field="tel_id", title="Telescope", width=70),
-            TableColumn(field="type", title="Type", width=150),
-            TableColumn(field="position", title="Position (m)", width=140),
-        ] + [
-            TableColumn(field=kind, title=f"{kind.upper()} events (rate)", width=120) for kind in KINDS
-        ] + [TableColumn(field="last_event", title="Last event", width=150)]
-        self.summary = DataTable(source=self.summary_source, columns=columns, width=1100, height=110,
-                                 index_position=None)
         self.array_container = column(self.message)
         all_tel_ids = session.all_tel_ids
         self.telescopes = CheckboxGroup(labels=[f"TEL {t}" for t in all_tel_ids],
@@ -85,8 +75,7 @@ class ArrayPage(Page):
             row(column(Div(text=WELCOME, width=540),
                        Div(text="<h3 style='margin: 8px 0 0 0'>Selected telescopes</h3>"),
                        self.telescopes, self.telescope_colors), self.array_container),
-            Div(text="<h3 style='margin: 8px 0 0 0'>Data received</h3>"),
-            self.summary,
+            Div(text="<h3 style='margin: 8px 0 0 0'>Rates of the valid events</h3>"),
             self.rates_container,
             self.pixel_container,
         )
@@ -120,35 +109,11 @@ class ArrayPage(Page):
         show(None, None, 0)
         self.array_container.children = ([view] if len(labels) > 1 else []) + [p.layout for p in panels.values()]
 
-    def _summary(self, counts, rates):
-        """Rows of the table of the data received (counts and rates of each telescope and data level)"""
-        store = self.store
-        tel_ids = store.tel_ids
-        subarray = store.subarray
-        data = {key: [] for key in ("tel_id", "type", "position", *KINDS, "last_event")}
-        for tel_id in tel_ids:
-            data["tel_id"].append(f"TEL {tel_id}")
-            if subarray is not None and tel_id in subarray.tel:
-                data["type"].append(str(subarray.tel[tel_id]))
-                x, y, z = subarray.positions[tel_id].to_value("m")
-                data["position"].append(f"({x:.1f}, {y:.1f}, {z:.1f})")
-            else:
-                data["type"].append("unknown")
-                data["position"].append("")
-            for kind in KINDS:
-                n = counts.get((tel_id, kind), 0)
-                rate = rates.get((tel_id, kind), 0.0)
-                data[kind].append(f"{n} ({rate:.1f} Hz)" if n else "–")
-            key = store.latest_key(tel_id)
-            data["last_event"].append("–" if key is None else f"{key[0]} / {key[1]}")
-        return data
-
     def refresh(self):
-        """Update the table of the data, the rates, the selected telescopes and the pixel selections"""
+        """Update the rates, the selected telescopes and the pixel selections"""
         if self.store.subarray is not self._subarray:
             self._build_array(self.store.subarray)
-        rates = self.store.rates()
-        self.summary_source.data = self._summary(self.store.counts(), rates)
+        rates = self.store.rates()  # rows received in the last seconds: the telescopes receiving data
         selected_tels = self.session.tel_ids
         for tel_id in selected_tels:
             if tel_id not in self.pixel_selections:
