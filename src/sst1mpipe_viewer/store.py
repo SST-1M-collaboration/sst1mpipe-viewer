@@ -467,8 +467,8 @@ class ViewerStore:
 
     def _push_event_row(self, kind, row):
         """
-        A row pushed event by event (the fast path of `_push_event_rows` for a single row): kept
-        in the last events, counted in the rates if valid, DL1 / DL2 rows buffered for the statistics
+        A row pushed event by event: kept in the last events of its telescope, counted in the
+        rates if its level is valid, and for the DL1 / DL2 buffered for the statistics
         """
         if kind not in KINDS:
             raise ValueError(f"Unknown kind {kind!r}, known: {KINDS}")
@@ -499,30 +499,6 @@ class ViewerStore:
                     self._flush()
             self.version += 1
 
-    def _push_event_rows(self, kind, columns):
-        """Rows pushed event by event: kept as the last events, DL1 rows buffered for the statistics"""
-        columns = self._check(kind, columns)
-        if columns is None:
-            return
-        now = time.monotonic()
-        with self._lock:
-            tel_ids = np.asarray(columns["tel_id"]).astype(int)
-            obs_ids = np.asarray(columns["obs_id"]).astype(int)
-            event_ids = np.asarray(columns["event_id"]).astype(int)
-            for i in range(len(tel_ids)):
-                tel_id, key = int(tel_ids[i]), (int(obs_ids[i]), int(event_ids[i]))
-                row = self._keep_event(tel_id, key, kind, _row(columns, i))
-                if isinstance(row, dict) and row_is_valid(kind, row):
-                    event_time = next((_unix_time(row[name]) for name in TIME_COLUMNS if name in row), None)
-                    self._count_valid(tel_id, key, kind, event_time)
-            for tel_id, tel_columns in self._split_telescopes(columns):
-                self._count(tel_id, kind, n_rows(tel_columns), now)
-                if kind in STATISTICS_KINDS:
-                    self._buffer(kind, tel_id, tel_columns)
-            if self._n_pending >= self.flush_size:
-                self._flush()
-            self.version += 1
-
     # ------------------------------------------------------------- statistics
     def _needed(self, kind):
         """Columns used by the statistics of a data level"""
@@ -531,19 +507,6 @@ class ViewerStore:
             names = {name for accumulator in statistics for name in accumulator.columns}
             self._needed_columns[kind] = names | {"tel_id", "obs_id", "event_id"}
         return self._needed_columns[kind]
-
-    def _buffer(self, kind, tel_id, columns):
-        """Keep rows pushed event by event for the statistics (only their columns used by the statistics)"""
-        if kind in DL2_KINDS:
-            # any algorithm can be plotted: all the columns with one value per row
-            kept = {name: values for name, values in columns.items() if np.ndim(values) == 1}
-        else:
-            needed = self._needed(kind)
-            # the parameters in the camera frame are kept to be converted to the telescope frame
-            kept = {name: values for name, values in columns.items()
-                    if name in needed or name.startswith(CAMERA_FRAME_PREFIX)}
-        self._pending.setdefault((kind, tel_id), []).append(kept)
-        self._n_pending += n_rows(columns)
 
     def _flush(self, tel_id=None, kind=None):
         """Fill the statistics with the buffered rows (of one telescope / data level, or of all)"""

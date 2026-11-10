@@ -185,18 +185,20 @@ Pushing an event is cheap, so that the viewer follows streams of more than 1 kHz
 - a user action (click, menu, Prev / Next) is applied at once, without waiting for the next
   refresh; the changes of a refresh are sent to the browser in one message.
 
-Measured with the Mrk 421 file (with synthetic DL2) replayed at 1 kHz (`--stereo FILE --replay-rate 1000 --loop`):
+Measured on the server with the Mrk 421 files of the two telescopes, replayed at 1 kHz each
+(2000 events/s in total):
 
-| | file (no stream) | stream at 1 kHz |
+| | files at once | 2 streams at 1 kHz |
 |---|---|---|
-| opening a page | 0.15–0.6 s | 0.25–0.9 s |
-| refresh of an event page (median) | 4–7 ms | 5–35 ms |
-| refresh of a statistics page (median) | 1–2 ms | 15–20 ms |
+| opening a page (building its document) | 0.2–0.6 s | 0.2–1.0 s |
+| refresh of an event page (median) | 6–8 ms | 8–16 ms |
+| refresh of a statistics page (median) | 1 ms | 13–23 ms |
 
-The rate is held (1000 events/s); `push_row` takes about 60 µs per row (170 µs per event of all
-the data levels). At 1 kHz the feed thread and the bokeh server share the Python interpreter
-(GIL), which slows the refreshes; running the ingest (reading the stream, filling the statistics)
-in a separate process would remove this contention.
+Pushing a row takes about 40 µs (130 µs per event with all its levels), i.e. about a quarter of a
+CPU core at 2000 events/s; the rate is held at 95 % while pages are being opened. The feed
+threads and the bokeh server share the Python interpreter (GIL): a refresh can occasionally take
+100–300 ms. Running the ingest (reading the streams, filling the statistics) in a separate
+process would remove this contention.
 
 The interface between the pipeline (files, ZMQ stream) and the viewer is not part of this package
 yet: `sst1mpipe_viewer.feeds` only reads files.
