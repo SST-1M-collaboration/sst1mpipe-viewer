@@ -23,7 +23,7 @@ WELCOME = """
 <h2 style="margin: 0 0 6px 0">Welcome to the SST-1M event viewer</h2>
 <p style="margin: 0 0 4px 0; max-width: 520px">
 The viewer shows the events of the selected telescopes (<b>R0</b>, <b>R1</b>, <b>DL0</b>,
-<b>DL1 Event</b> and <b>DL2 Event</b> pages), the statistics accumulated from their parameters
+<b>DL1</b> and <b>DL2</b> pages), the statistics accumulated from their parameters
 (<b>Statistics</b> pages), the stereo reconstruction (<b>DL2 Stereo</b>), the gamma-ray candidates
 (<b>DL3</b>) and the rates of the data, each telescope with its color.
 </p>

@@ -28,8 +28,8 @@ def refresh_all(session):
 def test_all_pages_refresh(subarray):
     store, session = make_session(subarray)
     assert session.tel_ids == [1, 2]  # all the telescopes are selected at first
-    assert [p.title for p in session.pages] == ["Array", "R0", "R1", "DL0", "DL1 Event", "DL1 Statistics",
-                                                "DL2 Event", "DL2 Statistics", "DL2 Stereo", "DL3", "Selection"]
+    assert [p.title for p in session.pages] == ["Array", "R0", "R1", "DL0", "DL1", "DL1 Statistics",
+                                                "DL2", "DL2 Statistics", "DL2 Stereo", "DL3", "Selection"]
     refresh_all(session)
     r0, r1 = session.pages[1], session.pages[2]
     # one block per selected telescope
@@ -247,7 +247,7 @@ def test_stream_keeps_following(subarray):
 
 
 def test_dl2_pages(subarray):
-    """DL2 Event: all the DL2 fields; DL2 Statistics: the algorithm of each group chosen in a menu"""
+    """DL2: all the DL2 fields; DL2 Statistics: the algorithm of each group chosen in a menu"""
     store = ViewerStore(subarray)
     store.push_row("dl1", dl1_row(1))
     store.push_row("dl2", dict(obs_id=1, event_id=1, tel_id=1, RF_tel_energy=1.0, Other_tel_energy=100.0,

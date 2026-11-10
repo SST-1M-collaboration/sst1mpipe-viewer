@@ -1,5 +1,5 @@
 """
-Pages of the events with an image: DL1 Event and DL2 Event.
+Pages of the events with an image: DL1 and DL2.
 
 Each selected telescope has a camera with a per pixel field of the DL1 image of its event (image,
 peak time, cleaning mask), the cleaning mask and the Hillas ellipse, and for the DL2 the
@@ -57,7 +57,7 @@ class ImageEventPage(Page):
     def __init__(self, session, kind="dl1"):
         super().__init__(session)
         self.kind = kind
-        self.title = f"{kind.upper()} Event"
+        self.title = kind.upper()
         self.options = CheckboxGroup(labels=["Cleaning mask", "Hillas ellipse (3σ)"], active=[SHOW_MASK, SHOW_ELLIPSE],
                                      inline=True)
         self.options.on_change("active", lambda attr, old, new: self.refresh())

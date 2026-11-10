@@ -1,6 +1,6 @@
 """
-Bokeh documents of the viewer: one web page per data level (Array, R0, R1, DL0, DL1 Event,
-DL1 Statistics, DL2 Event, DL2 Statistics, DL2 Stereo, DL3), with a header (navigation, displayed events).
+Bokeh documents of the viewer: one web page per data level (Array, R0, R1, DL0, DL1,
+DL1 Statistics, DL2, DL2 Statistics, DL2 Stereo, DL3), with a header (navigation, displayed events).
 
 The pages opened by a browser share a `UserState`: the selected telescopes (chosen in the Array
 page), the displayed event of each telescope and the selected pixels. It is found by the client id
@@ -61,9 +61,9 @@ PAGES = {
     "r0": ("/r0", "R0", lambda session: WaveformPage(session, "r0")),
     "r1": ("/r1", "R1", lambda session: WaveformPage(session, "r1")),
     "dl0": ("/dl0", "DL0", lambda session: WaveformPage(session, "dl0")),
-    "dl1": ("/dl1", "DL1 Event", lambda session: ImageEventPage(session, "dl1")),
+    "dl1": ("/dl1", "DL1", lambda session: ImageEventPage(session, "dl1")),
     "dl1_statistics": ("/dl1_statistics", "DL1 Statistics", lambda session: StatisticsPage(session, "dl1")),
-    "dl2": ("/dl2", "DL2 Event", lambda session: ImageEventPage(session, "dl2")),
+    "dl2": ("/dl2", "DL2", lambda session: ImageEventPage(session, "dl2")),
     "dl2_statistics": ("/dl2_statistics", "DL2 Statistics", lambda session: StatisticsPage(session, "dl2")),
     "dl2_stereo": ("/dl2_stereo", "DL2 Stereo", DL2StereoPage),
     "dl3": ("/dl3", "DL3", DL3Page),

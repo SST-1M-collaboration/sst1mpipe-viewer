@@ -24,7 +24,7 @@ class ArrayPanel:
         self.subarray = subarray
         self.display = ArrayDisplay(
             subarray, scale=scale, width=width, height=height, use_notebook=False,
-            tools="pan,wheel_zoom,box_zoom,reset,save", toolbar_location="above",
+            tools="wheel_zoom,box_zoom,reset,save", toolbar_location="above",
             title=f"{subarray.name or 'Array'}: telescope positions (ground frame)",
         )
         self.figure = self.display.figure
@@ -126,7 +126,7 @@ class ArrayMapPanel:
             title=f"{subarray.name or 'Array'}: telescopes on OpenStreetMap",
             x_axis_type="mercator", y_axis_type="mercator", match_aspect=True,
             x_range=(x.mean() - margin, x.mean() + margin), y_range=(y.mean() - margin, y.mean() + margin),
-            width=width, height=height, tools="pan,wheel_zoom,box_zoom,reset,save", toolbar_location="above",
+            width=width, height=height, tools="wheel_zoom,box_zoom,reset,save", toolbar_location="above",
         )
         self.figure.add_tile(tiles, retina=True)
         self.source = ColumnDataSource(data=dict(

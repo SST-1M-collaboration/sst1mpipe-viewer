@@ -10,7 +10,7 @@ from ..style import BACKGROUND, MUTED
 
 __all__ = ["Histogram1DPanel", "Histogram2DPanel", "format_number", "add_caption"]
 
-TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
+TOOLS = "wheel_zoom,box_zoom,reset,save"
 FILL_COLOR = "#3f6fb5"
 
 

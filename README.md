@@ -14,9 +14,9 @@ One web page per data level, linked by the navigation bar at the top:
 | `/` | **Array** | Telescopes on an OpenStreetMap map at their Earth location (or in the ground frame), each with its color used in all the pages (a click on a telescope selects or unselects it); **rates of the data levels in time** (one plot per telescope, one line per data level) |
 | `/selection` | **Selection** | **Selection of the telescopes** (check boxes) and **of the pixels by group**, one panel per telescope, of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`); neighbouring groups have different colors |
 | `/r0`, `/r1`, `/dl0` | **R0 / R1 / DL0** | Rate of the level in time; one block per selected telescope, with its own ◀ / ▶ (events of this telescope only) and its own **sample** slider, common to the waveform camera and the trigger traces: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 12 pixels: the 12 pixels of a module are all drawn), the camera of a per-pixel field chosen in a menu (the fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels, traces of the patches of the selected pixels); the table of all the fields, one column per telescope |
-| `/dl1` | **DL1 Event** | Rate of the level in time; per selected telescope (with its own ◀ / ▶): image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse; the table of all the DL1 and trigger fields |
+| `/dl1` | **DL1** | Rate of the level in time; per selected telescope (with its own ◀ / ▶): image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse; the table of all the DL1 and trigger fields |
 | `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations (one plot per telescope), reset buttons (per plot, selected telescopes, all) |
-| `/dl2` | **DL2 Event** | Rate of the level in time; per selected telescope: the DL1 image with the Hillas ellipse, and the table of **all the DL2 fields of the telescope** (every algorithm: geometry, energy, classification, impact, disp, with their uncertainties, validity and goodness of fit) |
+| `/dl2` | **DL2** | Rate of the level in time; per selected telescope: the DL1 image with the Hillas ellipse, and the table of **all the DL2 fields of the telescope** (every algorithm: geometry, energy, classification, impact, disp, with their uncertainties, validity and goodness of fit) |
 | `/dl2_statistics` | **DL2 Statistics** | Per telescope, **the algorithm of each group chosen in a menu** (geometry, energy, classification, impact, disp): reconstructed energy and its uncertainty, gammaness, altitude, azimuth, impact distance, disp, validity flags; gammaness vs energy, direction, impact vs energy |
 | `/dl2_stereo` | **DL2 Stereo** | The stereo reconstruction of the subarray (not per telescope): rate; the displayed stereo event with its own ◀ / ▶ (reconstructed core on the ground with the telescopes, those used ringed, and the table of all its fields); statistics of all the stereo events with the algorithm menus (energy, gammaness, direction, h_max, core map, ...) |
 | `/dl3` | **DL3** | Gamma-ray candidates of the observations (not per telescope): table of the observations (object, target, pointing, events, livetime), rate of the events in time, energy, θ² to the target, sky map around the target, position in the field of view (DETX / DETY) |
@@ -58,8 +58,9 @@ valid; otherwise a message says so (e.g. "No valid DL1 data in event N": the las
 had no Hillas parameters, or no waveforms for the R0 page).
 
 The cameras are drawn with pixels touching each other (the area of their grid cell, from the pitch
-of the pixels, instead of their sensitive area which leaves gaps), and the cameras and waveform
-plots cannot be moved: no pan nor wheel zoom, only a box zoom chosen in the toolbar.
+of the pixels, instead of their sensitive area which leaves gaps), and no plot can be moved
+(no pan): the cameras and waveforms have only a box zoom in their toolbar, the other plots also
+a wheel zoom.
 
 The look follows the SST-1M web site (https://sst1m.space): black background, Roboto text and
 Poppins titles (loaded from Google Fonts by the browser), the logos of the institutes of the
@@ -305,7 +306,7 @@ axis of the entries. (`transform: log10` is still available to histogram the log
 | `dl3.py` | DL3 event lists: reading of the FITS files, accumulated histograms, offsets to the target |
 | `feeds.py`, `publish.py` | Reading of files (HDF5 tables, ctapipe `EventSource`) and of the ZMQ stream of the pipeline into a store; publishing a file as the pipeline (test tool) |
 | `app.py`, `server.py`, `cli.py` | Bokeh pages (header, navigation, state shared by the pages of a browser), server, command line |
-| `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2 Event), `statistics.py`, `stereo.py` (DL2 Stereo), `dl3.py`, `pixel_selection.py` |
+| `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2), `statistics.py`, `stereo.py` (DL2 Stereo), `dl3.py`, `pixel_selection.py` |
 | `components/` | Bokeh displays independent of the store: camera, waveforms, histograms, rates, array map, fields table |
 | `pixel_groups.py`, `colors.py`, `style.py` | DigiCam pixel groups (from CTS), colors of the telescopes, look of the pages |
 

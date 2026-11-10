@@ -26,7 +26,7 @@ class RatePanel:
 
     def __init__(self, title, series, markers=None, width=1000, height=220):
         self.figure = figure(title=title, width=width, height=height, x_axis_type="datetime",
-                             tools="pan,xwheel_zoom,box_zoom,reset,save", toolbar_location="above")
+                             tools="xwheel_zoom,box_zoom,reset,save", toolbar_location="above")
         self.figure.yaxis.axis_label = "rate (Hz)"
         self.figure.title.text_font_size = "11pt"
         self.sources, self.renderers = {}, {}
