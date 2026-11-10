@@ -89,12 +89,11 @@ shows the files: all their events are processed at once (the statistics are thos
 events) and the first event of each telescope is shown; any event can then be reached with Prev /
 Next or its event id. The Mrk 421 test files (`tests/data/README.md`; `git lfs pull` to get them)
 have the R0, R1, DL0 and DL1 data of the two SST-1M telescopes processed by sst1mpipe, one file
-per telescope, and a file of emulated array events for the stereo mode; their DL2 and the DL3
-files hold **random values** (the pipeline does not produce them yet).
+per telescope, and a file of emulated array events for the stereo mode; their DL2 and DL3
+hold **random values** (the pipeline does not produce them yet).
 
 ```
-sst1mpipe-viewer --tel1 tests/data/mrk421_tel21.h5 tests/data/synthetic_dl3_tel21.fits \
-                 --tel2 tests/data/mrk421_tel22.h5 tests/data/synthetic_dl3_tel22.fits --replay-speed 1 --loop
+sst1mpipe-viewer --tel1 tests/data/mrk421_tel21.h5 --tel2 tests/data/mrk421_tel22.h5 --replay-speed 1 --loop
 ```
 
 replays the events as live streams, in the order and at the pace of their timestamps (`1`: real
@@ -104,7 +103,7 @@ their timestamps being shifted at each pass so that the time keeps increasing. `
 replays at a fixed rate instead (e.g. 1000 for a load test).
 
 ```
-sst1mpipe-viewer --stereo tests/data/mrk421_stereo.h5 tests/data/synthetic_dl3_stereo.fits --replay-speed 1
+sst1mpipe-viewer --stereo tests/data/mrk421_stereo.h5 --replay-speed 1
 ```
 
 replays array events: all the fields of an event are updated together (telescopes and stereo).
@@ -209,8 +208,9 @@ yet: `sst1mpipe_viewer.feeds` only reads files.
 
 ### DL3
 
-A DL3 FITS file (GADF event list, as written by `sst1mpipe_data_dl2_dl3`) given on the command
-line is read at once. The DL3 are accumulated per *series*: one per telescope in mono mode (two
+A DL3 event list is read at once, from a FITS file given on the command line (GADF format, as
+written by `sst1mpipe_data_dl2_dl3`) or from the HDF5 file of a stream (table `/dl3/events`,
+`sst1mpipe_viewer.dl3.write_dl3_hdf5`). The DL3 are accumulated per *series*: one per telescope in mono mode (two
 superimposed histograms, one map per telescope), a single one in stereo mode. From Python:
 
 ```python
@@ -246,6 +246,10 @@ hist1d:
 hist2d:
   - {x: hillas_intensity, x_log: true, x_range: [10, 100000], x_bins: 40, y: hillas_length, y_range: [0, 1], y_bins: 40}
 ```
+
+A `display` section holds the options of the page of the level: for the DL2 Stereo page,
+`ground_radius` (m, default 500) is the half size of the fixed view of the reconstructed core on
+the ground, centred between the telescopes.
 
 `log_x: true` gives logarithmic bins (of the values themselves, in `range`) drawn on a logarithmic
 axis; `x_log` / `y_log` do the same for the axes of a 2D histogram, and `log_y` is the logarithmic

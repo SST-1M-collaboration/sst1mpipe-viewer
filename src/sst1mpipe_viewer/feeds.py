@@ -39,7 +39,7 @@ from ctapipe.instrument import SubarrayDescription
 from ctapipe.io import read_table
 
 from .dl2 import SUBARRAY_ID
-from .dl3 import read_dl3
+from .dl3 import read_dl3, read_dl3_hdf5
 from .normalize import iter_rows, to_columns
 from .store import TIME_COLUMNS
 
@@ -298,6 +298,15 @@ class HDF5Feed(_ThreadedFeed):
         times = times[np.isfinite(times)]
         return (float(times.min()), float(times.max())) if len(times) else None
 
+    def push_dl3(self):
+        """
+        Push the DL3 event list of the file, if it has one (at once, also in a replay): the mono
+        analysis of the telescope of the stream, or the stereo analysis
+        """
+        dl3 = read_dl3_hdf5(self.path)
+        if dl3 is not None:
+            self.store.dl3.push(*dl3, series=SUBARRAY_ID if self.tel_ids is None else list(self.tel_ids)[0])
+
     def push_tables(self):
         """Push all the tables of the file at once (`ViewerStore.push_table`)"""
         for (kind, _), table in self.tables.items():
@@ -313,6 +322,8 @@ class HDF5Feed(_ThreadedFeed):
             Number of times the data were already replayed: the timestamps are shifted by this
             number of durations of the replay, so that the time keeps increasing in a loop.
         """
+        if pass_index == 0:
+            self.push_dl3()
         events = self.events()
         time_range = self.time_range()
         if self.clock is not None:
@@ -340,6 +351,7 @@ class HDF5Feed(_ThreadedFeed):
         """Push the data (blocking): the tables at once, or the replay of the events (endless with ``loop``)"""
         if not self.is_replay:
             self.push_tables()
+            self.push_dl3()
             return
         pass_index = 0
         while not self._stop.is_set():

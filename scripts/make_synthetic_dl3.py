@@ -9,6 +9,10 @@ Usage::
 
     python scripts/make_synthetic_dl3.py /tmp/synthetic_dl3.fits
     sst1mpipe-viewer --stereo /tmp/synthetic_dl3.fits
+
+or, to add the event list to the HDF5 file of a stream (read with its other data levels)::
+
+    python scripts/make_synthetic_dl3.py my_stream.h5 --hdf5
 """
 
 import argparse
@@ -48,10 +52,20 @@ def synthetic_events(rng, n_background=4000, n_signal=400, obs_id=1, start=17689
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("output", help="synthetic DL3 FITS file")
+    parser.add_argument("output", help="synthetic DL3 FITS file, or with --hdf5 the HDF5 file completed")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--hdf5", action="store_true",
+                        help="add the event list to an existing HDF5 file of a stream (table /dl3/events)"
+                        " instead of writing a FITS file")
     args = parser.parse_args()
     events, header = synthetic_events(np.random.default_rng(args.seed))
+    if args.hdf5:
+        from sst1mpipe_viewer.dl3 import write_dl3_hdf5
+
+        header["SYNTHETIC"] = "Random events (scripts/make_synthetic_dl3.py): NOT reconstructed data"
+        write_dl3_hdf5(args.output, events, header)
+        print(f"{args.output}: {len(events)} synthetic DL3 events in /dl3/events")
+        return
     hdu = fits.BinTableHDU(events, name="EVENTS")
     hdu.header.update(header)
     fits.HDUList([fits.PrimaryHDU(), hdu]).writeto(args.output, overwrite=True)

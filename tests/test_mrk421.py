@@ -267,16 +267,24 @@ def test_streams():
     assert rate_times[-1] > last and rates.max() > 0
 
 
-def test_synthetic_dl3_files():
-    """The synthetic DL3 files: one series per telescope in mono mode, the subarray in stereo mode"""
+def test_dl3_of_the_stream_files():
+    """The (synthetic) DL3 of the files of the streams: one series per telescope in mono mode, the subarray in stereo"""
     from sst1mpipe_viewer.cli import make_streams, parse_args, run_streams
     from sst1mpipe_viewer.dl2 import SUBARRAY_ID
+    from sst1mpipe_viewer.dl3 import read_dl3_hdf5
 
-    data = DATA
-    mono = ViewerStore(SubarrayDescription.from_hdf(MRK421_FILE))
-    run_streams(make_streams(parse_args(["--tel1", str(data / "synthetic_dl3_tel21.fits"),
-                                         "--tel2", str(data / "synthetic_dl3_tel22.fits")]), mono))
+    events, header = read_dl3_hdf5(TEL_FILES[21])
+    assert len(events) == 4400 and header["OBJECT"].startswith("Mrk 421") and "SYNTHETIC" in header
+    assert {"TIME", "RA", "DEC", "ENERGY"} <= set(events.colnames)
+    mono = ViewerStore()
+    run_streams(make_streams(parse_args(["--tel1", str(TEL_FILES[21]), "--tel2", str(TEL_FILES[22])]), mono))
     assert mono.dl3.series() == [21, 22] and mono.dl3.statistics(21)["n_rows"] == 4400
+    assert mono.dl3.statistics(22)["accumulators"]["theta2"]["n_entries"] == 4400
     stereo = ViewerStore()
-    run_streams(make_streams(parse_args(["--stereo", str(data / "synthetic_dl3_stereo.fits")]), stereo))
-    assert stereo.dl3.series() == [SUBARRAY_ID]
+    run_streams(make_streams(parse_args(["--stereo", str(STEREO_FILE)]), stereo))
+    assert stereo.dl3.series() == [SUBARRAY_ID] and stereo.dl3.observations()[0]["n_events"] == 4400
+    # in a replay the DL3 is pushed once, at the start
+    replay = HDF5Feed(TEL_FILES[22], ViewerStore(), tel_ids=[22], stereo=False, rate=100000)
+    replay.replay(0)
+    replay.replay(1)
+    assert replay.store.dl3.statistics(22)["n_rows"] == 4400

@@ -22,10 +22,11 @@ What is real and what is not:
   takes its `obs_id`, `event_id` and time; a subarray trigger is written for these events.
 - The groups concerned carry a `SYNTHETIC` attribute saying so.
 
-`synthetic_dl3_tel21.fits`, `synthetic_dl3_tel22.fits` and `synthetic_dl3_stereo.fits` are DL3
-event lists of **random events** (`scripts/make_synthetic_dl3.py`, seeds 21, 22 and 0; a uniform
-background and an excess at the position of Mrk 421), for the DL3 page in mono and stereo modes.
-They are not derived from the Mrk 421 data.
+- **The DL3 are SYNTHETIC**: each file has a DL3 event list of **random events** (table
+  `/dl3/events` with the GADF columns, its header in the attributes `HEADER_*`; a uniform background
+  and an excess at the position of Mrk 421), written by `scripts/make_synthetic_dl3.py --hdf5` with
+  the seeds 21, 22 and 0: the mono analysis of the telescope in the telescope files, the stereo
+  analysis in the stereo file. They are not derived from the Mrk 421 data.
 
 - **R0**: the DigiCam raw data of sst1mpipe (`SST1MR0CameraContainer`): ADC waveforms, DigiCam
   baseline (`pedestal`), `pixel_flags`, trigger traces.
@@ -71,15 +72,17 @@ the streams:
 ```
 python ../../scripts/make_synthetic_dl2.py mrk421_tel21_tel22.h5 mrk421_tel21_tel22_dl2.h5 --seed 421
 python make_stream_test_files.py mrk421_tel21_tel22_dl2.h5 --output-dir .
+python ../../scripts/make_synthetic_dl3.py mrk421_tel21.h5 --hdf5 --seed 21
+python ../../scripts/make_synthetic_dl3.py mrk421_tel22.h5 --hdf5 --seed 22
+python ../../scripts/make_synthetic_dl3.py mrk421_stereo.h5 --hdf5 --seed 0
 ```
 
 ## Usage
 
 ```
 # mono mode: one stream per telescope
-sst1mpipe-viewer --tel1 tests/data/mrk421_tel21.h5 tests/data/synthetic_dl3_tel21.fits \
-                 --tel2 tests/data/mrk421_tel22.h5 tests/data/synthetic_dl3_tel22.fits
+sst1mpipe-viewer --tel1 tests/data/mrk421_tel21.h5 --tel2 tests/data/mrk421_tel22.h5
 
-# stereo mode: the array events, with the (synthetic) stereo DL2
-sst1mpipe-viewer --stereo tests/data/mrk421_stereo.h5 tests/data/synthetic_dl3_stereo.fits
+# stereo mode: the array events, with the (synthetic) stereo DL2 and DL3
+sst1mpipe-viewer --stereo tests/data/mrk421_stereo.h5
 ```

@@ -6,7 +6,8 @@ A configuration lists the histograms of the statistics page of the level:
 
 - ``hist1d``: histograms of one column (``log_x: true`` for logarithmic bins and axis, the range
   being that of the values; ``log_y: true`` for a logarithmic axis of the entries);
-- ``hist2d``: histograms of two columns (correlations; ``x_log`` / ``y_log`` for logarithmic bins).
+- ``hist2d``: histograms of two columns (correlations; ``x_log`` / ``y_log`` for logarithmic bins);
+- ``display``: options of the page of the level (e.g. ``ground_radius`` of the DL2 Stereo page).
 """
 
 from importlib.resources import files
@@ -28,7 +29,7 @@ DEFAULT_STATISTICS_CONFIGS = {
     for kind in (*STATISTICS_KINDS, "dl3")  # the DL3 statistics are not per telescope (sst1mpipe_viewer.dl3)
 }
 
-SECTIONS = ("hist1d", "hist2d")
+SECTIONS = ("hist1d", "hist2d", "display")
 
 
 def load_statistics_config(path=None, kind="dl1"):

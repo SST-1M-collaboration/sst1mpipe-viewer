@@ -19,3 +19,9 @@ hist2d:
   - {x: core_x, x_range: [-500, 500], x_bins: 50, y: core_y, y_range: [-500, 500], y_bins: 50, name: core, title: "reconstructed core position (m)"}
   - {x: az, x_range: [0, 360], x_bins: 72, y: alt, y_range: [0, 90], y_bins: 45, title: "reconstructed direction (alt / az, deg)"}
   - {x: energy, x_log: true, x_range: [0.01, 1000], x_bins: 50, y: prediction, y_range: [0, 1], y_bins: 40, title: "gammaness vs energy (TeV)"}
+
+# Options of the DL2 Stereo page.
+#   ground_radius: half size (m) of the fixed view of the reconstructed core on the ground, centred
+#                  between the telescopes (500 m: a view of 1 km x 1 km).
+display:
+  ground_radius: 500

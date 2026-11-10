@@ -284,6 +284,12 @@ def test_dl2_stereo_page(subarray):
     page.refresh()
     assert page.core_source.data == dict(x=[-20.0], y=[2.0]) and "telescopes 1" in page.summary.text
     assert list(page.telescopes_source.data["line"]).count("white") == 1
+    # the view of the ground is fixed: the radius of the configuration around the centre of the telescopes
+    positions = np.array([subarray.positions[t].to_value("m") for t in subarray.tel_ids])
+    centre = positions[:, 0].mean()
+    assert page.ground_radius == 500.0
+    assert np.isclose(page.ground.x_range.start, centre - 500) and np.isclose(page.ground.x_range.end, centre + 500)
+    assert "PanTool" not in {type(tool).__name__ for tool in page.ground.tools}
 
 
 def test_rate_panel():

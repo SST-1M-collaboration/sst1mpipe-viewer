@@ -2,6 +2,9 @@
 DL3 data: lists of gamma-ray candidates of observations (GADF format, e.g. the FITS files written
 by ``sst1mpipe_data_dl2_dl3``).
 
+A DL3 event list can also be in the HDF5 file of a stream, with the other data levels
+(`write_dl3_hdf5`, `read_dl3_hdf5`).
+
 A DL3 file has an ``EVENTS`` table (``EVENT_ID``, ``TIME``, ``RA``, ``DEC``, ``ENERGY``, ``DETX``,
 ``DETY``) and a header describing the observation (``OBS_ID``, ``OBJECT``, ``RA_OBJ``, ``DEC_OBJ``,
 ``RA_PNT``, ``DEC_PNT``, ``LIVETIME``, ...). `DL3Data` accumulates the events of all the
@@ -17,14 +20,18 @@ there is no target.
 import threading
 
 import numpy as np
+import tables
 from astropy.table import Table
 
 from .config import build_statistics, load_statistics_config
 from .dl2 import SUBARRAY_ID
 from .rates import binned_rates
 
-__all__ = ["DL3Data", "read_dl3", "target_offsets", "unix_times"]
+__all__ = ["DL3Data", "DL3_TABLE", "read_dl3", "read_dl3_hdf5", "write_dl3_hdf5", "target_offsets", "unix_times"]
 
+#: path of the DL3 event list in an HDF5 file, and prefix of the attributes holding its header
+DL3_TABLE = "/dl3/events"
+HEADER_PREFIX = "HEADER_"
 #: MJD of the origin of the unix times
 UNIX_MJD = 40587.0
 
@@ -42,6 +49,50 @@ def read_dl3(path):
     """
     events = Table.read(path, hdu="EVENTS")
     return events, dict(events.meta)
+
+
+def write_dl3_hdf5(path, events, header):
+    """
+    Write a DL3 event list in an HDF5 file, next to the other data levels of a stream: the
+    ``EVENTS`` table as `DL3_TABLE` and its header as the attributes ``HEADER_<KEY>`` of the table.
+
+    Parameters
+    ----------
+    path : str or Path
+        The HDF5 file (the table is added to it, replacing an existing one).
+    events : astropy.table.Table
+        The ``EVENTS`` table (GADF columns).
+    header : dict
+        The header of the table (``OBS_ID``, ``OBJECT``, ``RA_OBJ``, ...).
+    """
+    from ctapipe.io import write_table
+
+    write_table(events, path, DL3_TABLE, overwrite=True)
+    with tables.open_file(path, "a") as h5file:
+        attributes = h5file.get_node(DL3_TABLE).attrs
+        for key, value in header.items():
+            attributes[f"{HEADER_PREFIX}{key}"] = value
+
+
+def read_dl3_hdf5(path):
+    """
+    Read the DL3 event list of an HDF5 file (`write_dl3_hdf5`).
+
+    Returns
+    -------
+    (events, header) or None
+        The ``EVENTS`` table and its header, None if the file has no DL3.
+    """
+    from ctapipe.io import read_table
+
+    with tables.open_file(path) as h5file:
+        if DL3_TABLE not in h5file:
+            return None
+        attributes = h5file.get_node(DL3_TABLE).attrs
+        header = {name[len(HEADER_PREFIX):]: attributes[name] for name in attributes._v_attrnamesuser
+                  if name.startswith(HEADER_PREFIX)}
+    header = {key: value.item() if isinstance(value, np.generic) else value for key, value in header.items()}
+    return read_table(path, DL3_TABLE), header
 
 
 def unix_times(times, header):

@@ -10,7 +10,7 @@ the accumulated statistics of all the stereo events. The algorithm of each group
 
 import numpy as np
 from bokeh.layouts import column, row
-from bokeh.models import ColumnDataSource, Div, LabelSet
+from bokeh.models import ColumnDataSource, Div, LabelSet, Range1d
 from bokeh.plotting import figure
 
 from ..components import FieldsTable, RatePanel
@@ -25,6 +25,8 @@ __all__ = ["DL2StereoPage"]
 KIND = "dl2_stereo"
 #: color of the reconstructed core and of the ring of the telescopes used in the reconstruction
 CORE_COLOR = "#e53935"
+#: default half size (m) of the view of the ground (``display: ground_radius`` of the configuration)
+GROUND_RADIUS = 500.0
 
 
 class DL2StereoPage(Page):
@@ -42,8 +44,14 @@ class DL2StereoPage(Page):
         self.message = message_div(width=600)
 
         # the telescopes on the ground and the reconstructed core of the displayed event
+        # a fixed view (no pan nor wheel zoom), centred between the telescopes
+        display = self.store.statistics_configs[KIND].get("display") or {}
+        self.ground_radius = float(display.get("ground_radius", GROUND_RADIUS))
         self.ground = figure(title="Reconstructed core on the ground", width=460, height=430, match_aspect=True,
-                             tools="pan,wheel_zoom,box_zoom,reset,save", toolbar_location="above")
+                             tools="box_zoom,reset,save", toolbar_location="above",
+                             x_range=Range1d(-self.ground_radius, self.ground_radius),
+                             y_range=Range1d(-self.ground_radius, self.ground_radius))
+        self.ground.toolbar.active_drag = None
         self.ground.xaxis.axis_label = "x (m), ground frame"
         self.ground.yaxis.axis_label = "y (m), ground frame"
         self.telescopes_source = ColumnDataSource(data=dict(x=[], y=[], label=[], color=[], line=[]))
@@ -85,6 +93,12 @@ class DL2StereoPage(Page):
         data = dict(x=positions[:, 0], y=positions[:, 1], label=[f"TEL {t}" for t in tel_ids],
                     color=[self.session.color(t) for t in tel_ids],
                     line=[CORE_COLOR if t in used else "white" for t in tel_ids])
+        if subarray is not self._subarray:
+            # the view is fixed: ``ground_radius`` around the centre of the telescopes
+            centre = positions[:, :2].mean(axis=0)
+            for axis_range, value in ((self.ground.x_range, centre[0]), (self.ground.y_range, centre[1])):
+                start, end = float(value - self.ground_radius), float(value + self.ground_radius)
+                axis_range.update(start=start, end=end, reset_start=start, reset_end=end)
         if subarray is not self._subarray or data["line"] != list(self.telescopes_source.data["line"]):
             self._subarray = subarray
             self.telescopes_source.data = data
