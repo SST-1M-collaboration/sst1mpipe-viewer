@@ -55,6 +55,11 @@ The cameras are drawn with pixels touching each other (the area of their grid ce
 of the pixels, instead of their sensitive area which leaves gaps), and the cameras and waveform
 plots cannot be moved: no pan nor wheel zoom, only a box zoom chosen in the toolbar.
 
+The look follows the SST-1M web site (https://sst1m.space): black background, Roboto text and
+Poppins titles (loaded from Google Fonts by the browser), the logos of the institutes of the
+collaboration at the bottom of the pages (`sst1mpipe_viewer/style.py`). The Hillas ellipse is
+drawn at 3 sigma.
+
 The color maps are not chosen in the pages (lighter pages) but on the command line: `--colormap`
 (waveform and image cameras), `--field-colormap` (per-pixel fields), `--color-scale lin|log`.
 
@@ -271,7 +276,7 @@ axis of the entries. (`transform: log10` is still available to histogram the log
 | `app.py`, `server.py`, `cli.py` | Bokeh pages (header, navigation, state shared by the pages of a browser), server, command line |
 | `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2 Event), `statistics.py`, `stereo.py` (DL2 Stereo), `dl3.py`, `pixel_selection.py` |
 | `components/` | Bokeh displays independent of the store: camera, waveforms, histograms, rates, array map, fields table |
-| `pixel_groups.py`, `colors.py` | DigiCam pixel groups (from CTS), colors of the telescopes |
+| `pixel_groups.py`, `colors.py`, `style.py` | DigiCam pixel groups (from CTS), colors of the telescopes, look of the pages |
 
 ## Tests
 

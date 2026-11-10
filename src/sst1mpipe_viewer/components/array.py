@@ -142,7 +142,8 @@ class ArrayMapPanel:
         ]))
         self.figure.add_layout(LabelSet(x="x", y="y", text="label", source=self.source, y_offset=14,
                                         text_align="center", text_font_size="11pt", text_font_style="bold",
-                                        background_fill_color="white", background_fill_alpha=0.7))
+                                        text_color="#111111", background_fill_color="white",
+                                        background_fill_alpha=0.7))
         self._x, self._y, self._radius = x, y, radius * 4
         self._ring = ColumnDataSource(data=dict(x=[], y=[], radius=[], color=[]))
         self.figure.circle(x="x", y="y", radius="radius", source=self._ring, fill_color=None,

@@ -7,6 +7,7 @@ selected in the Selection page (`sst1mpipe_viewer.pages.selection`).
 from bokeh.layouts import column, row
 from bokeh.models import Div, RadioButtonGroup
 
+from .. import style
 from ..components import ArrayMapPanel, ArrayPanel, RatePanel
 from ..components.array import earth_locations
 from ..store import TELESCOPE_KINDS as KINDS
@@ -16,7 +17,7 @@ __all__ = ["ArrayPage"]
 
 #: colors of the data levels in the rate plots
 LEVEL_COLORS = {"r0": "#1b9e77", "r1": "#d95f02", "dl0": "#7570b3", "dl1": "#e7298a", "dl2": "#66a61e",
-                "trigger": "#666666"}
+                "trigger": "#bdbdbd"}
 
 WELCOME = """
 <h2 style="margin: 0 0 6px 0">Welcome to the SST-1M event viewer</h2>
@@ -55,7 +56,7 @@ class ArrayPage(Page):
         self.rate_panels = {}
         for tel_id in all_tel_ids:
             panel = RatePanel(f"Rates of TEL {tel_id} per minute (dashed line: displayed event)", series,
-                              markers={"event": "black"}, width=1100, height=200)
+                              markers={"event": style.FOREGROUND}, width=1100, height=200)
             panel.figure.title.text_color = session.color(tel_id)
             self.rate_panels[tel_id] = panel
         self.rates_container = column()

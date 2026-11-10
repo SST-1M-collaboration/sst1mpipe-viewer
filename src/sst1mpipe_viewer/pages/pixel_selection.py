@@ -4,6 +4,7 @@ import numpy as np
 from bokeh.layouts import column, row
 from bokeh.models import Button, Div, Select, TextInput
 
+from .. import style
 from ..components import CameraPanel
 from ..pixel_groups import GROUP_PALETTE, GROUPINGS, group_color_indices, parse_ids, pixel_groups
 
@@ -47,7 +48,7 @@ class PixelSelectionPanel:
         self.add = Button(label="Add to the selection", width=170)
         self.add.on_click(lambda: self.select_ids(self.ids.value, add=True))
         self.info = Div(text="", width=300)
-        self.message = Div(text="", width=300, styles={"color": "#666"})
+        self.message = Div(text="", width=300, styles={"color": style.MUTED})
         self.camera = CameraPanel(title="Groups of pixels", width=430, height=400, cmap=list(GROUP_PALETTE),
                                   on_pixel_tap=self.tapped, show_colorbar=False,
                                   selected_color="#e53935")

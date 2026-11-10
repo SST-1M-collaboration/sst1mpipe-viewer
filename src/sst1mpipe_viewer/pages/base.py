@@ -5,6 +5,7 @@ from bokeh.layouts import row
 from bokeh.models import Button, Div
 from ctapipe.containers import EventType
 
+from .. import style
 from ..components import RatePanel
 
 __all__ = ["Page", "LevelRates", "message_div", "event_description", "telescope_header", "missing_message"]
@@ -26,7 +27,7 @@ def missing_message(session, tel_id, kind):
 
 def message_div(text="", width=900, height=28):
     """A line of text for the messages of a page (e.g. "No R1 data in this event.")"""
-    styles = {"font-size": "11pt", "color": "#c62828", "padding": "4px 0"}
+    styles = {"font-size": "11pt", "color": style.ERROR, "padding": "4px 0"}
     return Div(text=text, styles=styles, width=width, height=height)
 
 

@@ -5,6 +5,8 @@ from bokeh.models import ColumnDataSource, HoverTool, Legend, LegendItem, Span
 from bokeh.palettes import Paired12
 from bokeh.plotting import figure
 
+from ..style import FOREGROUND
+
 __all__ = ["WaveformPanel", "waveform_2d"]
 
 #: tools of the waveforms: no pan nor wheel zoom, the plot stays in place (box zoom from the toolbar)
@@ -69,7 +71,7 @@ class WaveformPanel:
             # a group of pixels (e.g. a module or a sector): their mean waveform
             self._set_mean(waveforms, pixels, sample)
             self._set_baselines(samples, None if baselines is None else [np.nanmean(np.asarray(baselines)[pixels])],
-                                ["black"])
+                                [FOREGROUND])
             return
 
         colors = [COLORS[i % MAX_PIXELS] for i in range(len(pixels))]
@@ -95,7 +97,7 @@ class WaveformPanel:
         """Show the mean waveform of the pixels (a group of pixels)"""
         samples = np.arange(waveforms.shape[-1])
         label = f"mean of {len(pixels)} {self.item_label}s"
-        self.source.data = dict(xs=[samples], ys=[np.nanmean(waveforms[pixels], axis=0)], color=["black"],
+        self.source.data = dict(xs=[samples], ys=[np.nanmean(waveforms[pixels], axis=0)], color=[FOREGROUND],
                                 pixel=[label])
         if self._legend_pixels != ("mean", len(pixels)):
             self._legend_pixels = ("mean", len(pixels))

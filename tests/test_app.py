@@ -123,7 +123,7 @@ def test_components(subarray):
     assert panel.display.norm.low == 1
     panel.set_ellipse({"hillas_fov_lon": 0, "hillas_fov_lat": 0, "hillas_length": 1, "hillas_width": 0.5,
                        "hillas_psi": 90})
-    assert panel._ellipse_source.data["width"] == [2]
+    assert panel._ellipse_source.data["width"] == [6]  # the 3 sigma contour
     panel.set_ellipse({"hillas_fov_lon": np.nan})
     assert panel._ellipse_source.data["x"] == []
 

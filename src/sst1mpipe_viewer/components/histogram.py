@@ -6,6 +6,8 @@ from bokeh.models import Button, ColorBar, ColumnDataSource, LinearColorMapper, 
 from bokeh.palettes import Viridis256
 from bokeh.plotting import figure
 
+from ..style import BACKGROUND, MUTED
+
 __all__ = ["Histogram1DPanel", "Histogram2DPanel", "format_number", "add_caption"]
 
 TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
@@ -27,7 +29,7 @@ def add_caption(fig, text=""):
     not lay out the whole page again, which is slow with many figures.
     """
     caption = Title(text=text, align="left", text_font_size="8.5pt", text_font_style="normal",
-                    text_color="#555")
+                    text_color=MUTED)
     fig.add_layout(caption, "below")
     return caption
 
@@ -144,7 +146,7 @@ class Histogram2DPanel:
         self.figure.title.text_font_size = "11pt"
         self.figure.grid.visible = False
         mapper_class = LogColorMapper if log_z else LinearColorMapper
-        self.color_mapper = mapper_class(palette=Viridis256, low=0, high=1, low_color="white")
+        self.color_mapper = mapper_class(palette=Viridis256, low=0, high=1, low_color=BACKGROUND)
         self.source = ColumnDataSource(data=dict(image=[], x=[], y=[], dw=[], dh=[]))
         self.figure.image(image="image", x="x", y="y", dw="dw", dh="dh", source=self.source,
                           color_mapper=self.color_mapper)

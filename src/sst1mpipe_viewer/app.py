@@ -21,6 +21,7 @@ from bokeh.layouts import column, row
 from bokeh.models import Button, Div, TextInput, Toggle
 from ctapipe.coordinates import TelescopeFrame
 
+from . import style
 from .colors import telescope_color
 from .components import CameraPanel
 from .components.camera import tiling_geometry
@@ -31,8 +32,13 @@ __all__ = ["PAGES", "StateRegistry", "UserState", "ViewerSession", "make_documen
 
 #: color of the stereo (subarray) data
 SUBARRAY_COLOR = "#444444"
-#: background of the banner, the logo is white
-BANNER_COLOR = "#282828"
+#: logos of the institutes of the SST-1M collaboration, at the bottom of the pages (from sst1m.space)
+INSTITUTE_LOGOS = (
+    ("unige.png", "Université de Genève"),
+    ("asu_cas.png", "Astronomical Institute of the Czech Academy of Sciences"),
+    ("fzu.png", "Institute of Physics of the Czech Academy of Sciences"),
+    ("ifj_pan.png", "Institute of Nuclear Physics, Polish Academy of Sciences"),
+)
 #: period of the check for changes (ms): new data, actions in the other pages of the browser
 REFRESH_PERIOD = 250
 #: minimum time between two refreshes of an event page for new data (s): at high rates, the
@@ -62,11 +68,24 @@ PAGES = {
 STATISTICS_PAGES = ("dl1_statistics", "dl2_statistics", "dl3")
 
 
+def _image_html(path, height, alt):
+    """``<img>`` of an image of the package resources, embedded in the page"""
+    data = base64.b64encode((files("sst1mpipe_viewer") / "resources" / path).read_bytes()).decode()
+    return f"<img src='data:image/png;base64,{data}' style='height: {height}px' alt='{alt}' title='{alt}'>"
+
+
 @functools.cache
 def _logo_html(height=56):
-    """HTML ``<img>`` of the SST-1M logo (white, for the dark banner), embedded in the page"""
-    data = base64.b64encode((files("sst1mpipe_viewer") / "resources" / "logo.png").read_bytes()).decode()
-    return f"<img src='data:image/png;base64,{data}' style='height: {height}px' alt='SST-1M'>"
+    """``<img>`` of the SST-1M logo (white, for the black background)"""
+    return _image_html("logo.png", height, "SST-1M")
+
+
+@functools.cache
+def _footer_html():
+    """The logos of the institutes of the collaboration, as at the bottom of sst1m.space"""
+    logos = "".join(_image_html(f"logos/{name}", 48, alt) for name, alt in INSTITUTE_LOGOS)
+    return (f"<div style='display: flex; align-items: center; gap: 48px; padding: 18px 4px; margin-top: 24px;"
+            f" border-top: 1px solid {style.BORDER}'>{logos}</div>")
 
 
 class UserState:
@@ -185,26 +204,27 @@ class ViewerSession:
         self.event_input.on_change("value", lambda attr, old, new: self.go_to(new))
         self.clear_pixels = Button(label="Clear pixel selection", width=150)
         self.clear_pixels.on_click(self.clear_selected_pixels)
-        self.status = Div(text="", styles={"font-size": "10pt", "color": "#444"}, width=1400, height=40)
+        self.status = Div(text="", styles={"font-size": "10pt", "color": style.MUTED}, width=1400, height=40)
 
         _, title, factory = PAGES[page]
         self.page = factory(self)
         # every refresh of the many figures of the statistics page lays the page out again
         self.page.min_interval = statistics_period if page in STATISTICS_PAGES else event_period
 
-        # the SST-1M logo (from sst1m.space) is white: it is shown on a dark banner
+        # the SST-1M logo (white) and the title, on the black background of sst1m.space
         banner = Div(
             text=(
-                f"<div style='display: flex; align-items: center; gap: 24px; padding: 10px 18px;"
-                f" background: {BANNER_COLOR}; border-radius: 4px'>{_logo_html()}"
-                "<span style='font-size: 22pt; font-weight: 600; color: white'>Event Viewer</span></div>"
+                f"<div style='display: flex; align-items: center; gap: 24px; padding: 8px 4px'>{_logo_html()}"
+                f"<span style='font-family: {style.TITLE_FONT}; font-size: 22pt; font-weight: 600;"
+                f" color: {style.HEADING}'>Event Viewer</span></div>"
             ),
             width=1400, height=80,
         )
         controls = row(column(Div(text=""), row(self.live, self.prev_button, self.next_button)),
                        self.event_input, column(Div(text=""), self.clear_pixels))
         self.layout = column(banner, Div(text=self._navigation_html(), width=1400, height=34), controls,
-                             self.status, self.page.layout)
+                             self.status, self.page.layout, Div(text=_footer_html(), width=1400),
+                             stylesheets=[style.page_stylesheet()])
 
         # the first refresh is done before the page is in the document: the changes of the models
         # of a document are slow (bokeh indexes all its models again when references change), and
@@ -212,6 +232,7 @@ class ViewerSession:
         self.tick()
         if doc is not None:
             doc.title = f"SST-1M Event Viewer – {title}"
+            doc.theme = style.THEME
             doc.add_root(self.layout)
             doc.add_periodic_callback(self.tick, refresh_period)
 
@@ -224,11 +245,13 @@ class ViewerSession:
         """Links to the pages, with the client id (the pages share the state of the browser)"""
         links = []
         for name, (path, title, _) in PAGES.items():
-            style = ("background: #282828; color: white;" if name == self.page_name
-                     else "background: #eceff1; color: #263238;")
-            links.append(f"<a href='{path}?c={self.client_id}' style='{style} padding: 6px 14px;"
-                         f" border-radius: 4px; text-decoration: none; font-weight: 600'>{title}</a>")
-        return f"<div style='display: flex; gap: 8px; font-size: 11pt'>{''.join(links)}</div>"
+            # the current page underlined, as in the menu of sst1m.space
+            look = (f"color: {style.HEADING}; border-bottom: 2px solid {style.LINK};" if name == self.page_name
+                    else f"color: {style.TEXT}; border-bottom: 2px solid transparent;")
+            links.append(f"<a href='{path}?c={self.client_id}' style='{look} padding: 4px 2px;"
+                         f" text-decoration: none; text-transform: uppercase; letter-spacing: 0.05em'>{title}</a>")
+        return (f"<div style='display: flex; gap: 22px; font-family: {style.TITLE_FONT}; font-size: 10.5pt'>"
+                f"{''.join(links)}</div>")
 
     def camera_panel(self, **kwargs):
         """Camera with the colormap and the color scale of the viewer"""
@@ -524,7 +547,7 @@ class ViewerSession:
             telescopes.append(label)
         mode = "following the last events" if state.follow else "browsing"
         if state.goto_error:
-            mode += f" &nbsp;<span style='color: #c62828'>{state.goto_error}</span>"
+            mode += f" &nbsp;<span style='color: {style.ERROR}'>{state.goto_error}</span>"
         return (
             f"<b>Source</b>: {source} &nbsp;|&nbsp; {' &nbsp; '.join(telescopes) or 'no telescope selected'}"
             f" &nbsp;|&nbsp; {mode}"

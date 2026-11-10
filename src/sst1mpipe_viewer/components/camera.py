@@ -16,6 +16,8 @@ __all__ = ["CameraPanel", "COLOR_SCALES", "tiling_geometry"]
 COLOR_SCALES = ("lin", "log")
 
 MASK_COLOR = "#00e676"
+#: the Hillas ellipse is drawn at this number of sigmas (its contour encloses the shower image)
+ELLIPSE_SIGMA = 3
 SELECTED_COLOR = "#00b0ff"
 
 #: tools of the cameras: no pan nor wheel zoom, the camera stays in place (box zoom from the toolbar)
@@ -253,7 +255,8 @@ class CameraPanel:
 
     def set_ellipse(self, hillas):
         """
-        Draw the Hillas ellipse (1 sigma) of a dict with ``hillas_fov_lon``, ``hillas_fov_lat``,
+        Draw the Hillas ellipse (its `ELLIPSE_SIGMA` sigma contour, the length and width being 1
+        sigma) of a dict with ``hillas_fov_lon``, ``hillas_fov_lat``,
         ``hillas_length``, ``hillas_width`` and ``hillas_psi`` (deg); None or non finite
         parameters remove it.
         """
@@ -263,7 +266,8 @@ class CameraPanel:
             values = [float(hillas.get(k, np.nan)) for k in keys]
             if all(np.isfinite(values)):
                 lon, lat, length, width, psi = values
-                data = dict(x=[lon], y=[lat], width=[2 * length], height=[2 * width], angle=[np.deg2rad(psi)])
+                data = dict(x=[lon], y=[lat], width=[2 * ELLIPSE_SIGMA * length],
+                            height=[2 * ELLIPSE_SIGMA * width], angle=[np.deg2rad(psi)])
         self._ellipse_source.data = data
 
     def set_source(self, position):

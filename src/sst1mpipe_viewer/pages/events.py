@@ -58,7 +58,7 @@ class ImageEventPage(Page):
         super().__init__(session)
         self.kind = kind
         self.title = f"{kind.upper()} Event"
-        self.options = CheckboxGroup(labels=["Cleaning mask", "Hillas ellipse"], active=[SHOW_MASK, SHOW_ELLIPSE],
+        self.options = CheckboxGroup(labels=["Cleaning mask", "Hillas ellipse (3σ)"], active=[SHOW_MASK, SHOW_ELLIPSE],
                                      inline=True)
         self.options.on_change("active", lambda attr, old, new: self.refresh())
         self.pixel_field = Select(title="Camera", value="image", options=["image", "peak_time", "image_mask"],
