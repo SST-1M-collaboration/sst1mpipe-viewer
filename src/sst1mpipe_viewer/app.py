@@ -23,6 +23,7 @@ from ctapipe.coordinates import TelescopeFrame
 
 from .colors import telescope_color
 from .components import CameraPanel
+from .components.camera import tiling_geometry
 from .dl2 import SUBARRAY_ID
 from .pages import ArrayPage, DL2StereoPage, DL3Page, ImageEventPage, StatisticsPage, WaveformPage
 
@@ -294,13 +295,17 @@ class ViewerSession:
         self.set_tels(selected - {tel_id} if tel_id in selected else selected | {tel_id})
 
     def geometry(self, tel_id):
-        """Camera geometry of a telescope in the TelescopeFrame (None if unknown)"""
+        """
+        Camera geometry of a telescope for the displays (None if unknown): in the TelescopeFrame,
+        with pixels touching each other (`sst1mpipe_viewer.components.camera.tiling_geometry`)
+        """
         subarray = self.store.subarray
         if subarray is None or tel_id is None or tel_id not in subarray.tel:
             return None
         key = (id(subarray), tel_id)
         if key not in self._geometries:
-            self._geometries[key] = subarray.tel[tel_id].camera.geometry.transform_to(TelescopeFrame())
+            geometry = subarray.tel[tel_id].camera.geometry.transform_to(TelescopeFrame())
+            self._geometries[key] = tiling_geometry(geometry)
         return self._geometries[key]
 
     # ---------------------------------------------------------------- event
@@ -466,19 +471,27 @@ class ViewerSession:
             self.page.refresh()
 
     def _auto_browse(self):
-        """A file being loaded: show its first events as soon as they are there"""
+        """
+        Files being loaded: show the first event of each telescope as soon as it is there (the files
+        of the streams are read in parallel: the telescopes do not get their events together)
+        """
         state, store = self.state, self.store
-        if not state.auto_browse:
+        if state.auto_browse:
+            if store.has_event_data:  # a stream, not a file: the Live mode is kept
+                state.auto_browse = False
+                return
+            if any(store.event_keys(t) for t in store.event_tel_ids):
+                state.auto_browse = False
+                state.follow = False
+                state.event_keys = {}
+                state.changed()
+        if state.follow or store.has_event_data:
             return
-        if store.has_event_data:  # a stream, not a file: the Live mode is kept
-            state.auto_browse = False
-            return
-        first = {t: keys[0] for t in store.event_tel_ids if (keys := store.event_keys(t))}
-        if first:
-            state.auto_browse = False
-            state.follow = False
-            state.event_keys = first
-            state.changed()
+        # browsing files: a telescope whose events arrive later shows its first event
+        for tel_id in store.event_tel_ids:
+            if tel_id not in state.event_keys and (keys := store.event_keys(tel_id)):
+                state.event_keys[tel_id] = keys[0]
+                state.changed()
 
     def _needs_refresh(self):
         """Whether the page must be refreshed: an action of the user, or new data (not too often)"""

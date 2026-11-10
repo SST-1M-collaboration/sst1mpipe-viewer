@@ -4,11 +4,13 @@ import numpy as np
 from bokeh.events import Tap
 from bokeh.layouts import column
 from bokeh.models import ColorBar, ColumnDataSource, HoverTool
+from ctapipe.instrument import CameraGeometry
 from ctapipe.visualization.bokeh import CameraDisplay
+from scipy.spatial import cKDTree
 
 from .histogram import add_caption
 
-__all__ = ["CameraPanel", "COLOR_SCALES"]
+__all__ = ["CameraPanel", "COLOR_SCALES", "tiling_geometry"]
 
 #: color scales of the cameras (configured when the viewer is started, not in the pages)
 COLOR_SCALES = ("lin", "log")
@@ -16,7 +18,41 @@ COLOR_SCALES = ("lin", "log")
 MASK_COLOR = "#00e676"
 SELECTED_COLOR = "#00b0ff"
 
-TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
+#: tools of the cameras: no pan nor wheel zoom, the camera stays in place (box zoom from the toolbar)
+TOOLS = "box_zoom,reset,save"
+
+
+def tiling_geometry(geometry):
+    """
+    Geometry for the display of a camera, whose pixels touch each other.
+
+    The area of the pixels of a camera geometry is their sensitive area: drawn with it, the
+    pixels are separated by gaps (the dead space between them). For the display, hexagonal and
+    square pixels are given the area of the cell of their grid, computed from the distance
+    between neighbouring pixels (the pitch), so that they tile the camera without gaps. The
+    positions of the pixels are not changed.
+
+    Parameters
+    ----------
+    geometry : ctapipe.instrument.CameraGeometry
+
+    Returns
+    -------
+    ctapipe.instrument.CameraGeometry
+        A copy with the tiling ``pix_area`` (the geometry itself for other pixel shapes).
+    """
+    shape = geometry.pix_type.name
+    if shape not in ("HEXAGON", "SQUARE") or geometry.n_pixels < 2:
+        return geometry
+    positions = np.column_stack([geometry.pix_x.value, geometry.pix_y.value])
+    distances, _ = cKDTree(positions).query(positions, k=2)
+    pitch = float(np.median(distances[:, 1]))  # distance to the nearest neighbour
+    area = pitch**2 * (np.sqrt(3) / 2 if shape == "HEXAGON" else 1.0)
+    return CameraGeometry(
+        name=geometry.name, pix_id=geometry.pix_id, pix_x=geometry.pix_x, pix_y=geometry.pix_y,
+        pix_area=np.full(geometry.n_pixels, area) * geometry.pix_x.unit**2, pix_type=geometry.pix_type,
+        pix_rotation=geometry.pix_rotation, cam_rotation=geometry.cam_rotation, frame=geometry.frame,
+    )
 
 
 class CameraPanel:
@@ -50,6 +86,7 @@ class CameraPanel:
             use_notebook=False, toolbar_location="above",
         )
         self.figure = self.display.figure
+        self.figure.toolbar.active_drag = None  # dragging does nothing unless the box zoom is chosen
         self.figure.title.text = title
         self.figure.axis.visible = True
         self.figure.grid.visible = False

@@ -50,6 +50,10 @@ vertical line marks the time of the displayed event of each telescope.
 valid, and keeps it until the next valid one. When browsing, an event whose level is missing or
 not valid is not displayed (a message says so).
 
+The cameras are drawn with pixels touching each other (the area of their grid cell, from the pitch
+of the pixels, instead of their sensitive area which leaves gaps), and the cameras and waveform
+plots cannot be moved: no pan nor wheel zoom, only a box zoom chosen in the toolbar.
+
 The color maps are not chosen in the pages (lighter pages) but on the command line: `--colormap`
 (waveform and image cameras), `--field-colormap` (per-pixel fields), `--color-scale lin|log`.
 

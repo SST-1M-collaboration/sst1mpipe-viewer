@@ -341,3 +341,35 @@ def test_only_valid_levels_are_displayed(subarray):
     session.go_to("1")
     refresh_all(session)
     assert r1.shown and dl1.shown and dl1.message.text == ""
+
+
+def test_camera_display_geometry(subarray):
+    """The pixels of the displayed cameras touch each other, and the cameras cannot be moved"""
+    from sst1mpipe_viewer.components.camera import tiling_geometry
+
+    geometry = subarray.tel[1].camera.geometry
+    tiling = tiling_geometry(geometry)
+    x, y = geometry.pix_x.value, geometry.pix_y.value
+    distance = np.hypot(x[:, None] - x[None], y[:, None] - y[None])
+    np.fill_diagonal(distance, np.inf)
+    pitch = np.median(distance.min(axis=1))
+    factor = np.sqrt(3) / 2 if geometry.pix_type.name == "HEXAGON" else 1.0
+    assert np.allclose(tiling.pix_area.value, factor * pitch**2)
+    assert np.array_equal(tiling.pix_x, geometry.pix_x) and tiling.n_pixels == geometry.n_pixels
+    session = Browser(ViewerStore(subarray))
+    assert np.allclose(session.geometry(1).pix_area.value, session.geometry(1).pix_area.value[0])
+    panel = CameraPanel(session.geometry(1))
+    tools = {type(tool).__name__ for tool in panel.figure.tools}
+    assert "PanTool" not in tools and "WheelZoomTool" not in tools and panel.figure.toolbar.active_drag is None
+
+
+def test_files_loaded_one_after_the_other(subarray):
+    """Mono mode: the file of a telescope loaded after the other still shows its first event"""
+    store = ViewerStore(subarray)
+    session = Browser(store)
+    store.push_table("dl1", Table(rows=[dl1_row(i, tel_id=2) for i in (5, 6)]))
+    session.tick()
+    assert not session.follow and session.event_key(2) == (1, 5) and session.event_key(1) is None
+    store.push_table("dl1", Table(rows=[dl1_row(i, tel_id=1) for i in (7, 8)]))
+    session.tick()
+    assert session.event_key(1) == (1, 7) and session.event_key(2) == (1, 5)

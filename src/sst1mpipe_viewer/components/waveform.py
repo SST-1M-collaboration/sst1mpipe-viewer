@@ -7,7 +7,8 @@ from bokeh.plotting import figure
 
 __all__ = ["WaveformPanel", "waveform_2d"]
 
-TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
+#: tools of the waveforms: no pan nor wheel zoom, the plot stays in place (box zoom from the toolbar)
+TOOLS = "box_zoom,reset,save"
 #: colors of the waveforms: 12, so that the 12 pixels of a module are all drawn
 COLORS = Paired12
 #: more pixels than this are shown by their mean waveform
@@ -35,6 +36,7 @@ class WaveformPanel:
 
     def __init__(self, title="Waveforms", y_label="", width=620, height=400, item_label="pixel"):
         self.figure = figure(title=title, width=width, height=height, tools=TOOLS, toolbar_location="above")
+        self.figure.toolbar.active_drag = None  # dragging does nothing unless the box zoom is chosen
         self.figure.xaxis.axis_label = "sample"
         self.figure.yaxis.axis_label = y_label
         self.source = ColumnDataSource(data=dict(xs=[], ys=[], color=[], pixel=[]))
