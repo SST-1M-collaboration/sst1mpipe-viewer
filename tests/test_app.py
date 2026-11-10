@@ -28,7 +28,7 @@ def test_all_pages_refresh(subarray):
     store, session = make_session(subarray)
     assert session.tel_ids == [1, 2]  # all the telescopes are selected at first
     assert [p.title for p in session.pages] == ["Array", "R0", "R1", "DL0", "DL1 Event", "DL1 Statistics",
-                                                "DL2 Event", "DL2 Statistics"]
+                                                "DL2 Event", "DL2 Statistics", "DL3"]
     refresh_all(session)
     r0, r1 = session.pages[1], session.pages[2]
     # one block per selected telescope
@@ -157,7 +157,7 @@ def test_server_pages(subarray):
     server = make_server(store, port=0, refresh_period=2000)
     try:
         assert set(server._tornado.applications) == {"/", "/r0", "/r1", "/dl0", "/dl1", "/dl1_statistics", "/dl2",
-                                                       "/dl2_statistics"}
+                                                       "/dl2_statistics", "/dl3"}
         for path, title in (("/", "Array"), ("/r1", "R1"), ("/dl1_statistics", "DL1 Statistics"),
                             ("/dl2_statistics", "DL2 Statistics")):
             doc = Document()

@@ -18,9 +18,10 @@ from astropy.table import join
 from ctapipe.instrument import SubarrayDescription
 from ctapipe.io import read_table
 
+from .dl3 import read_dl3
 from .normalize import iter_rows, to_columns
 
-__all__ = ["read_tables", "HDF5Feed", "EventSourceFeed", "make_feed"]
+__all__ = ["read_tables", "HDF5Feed", "EventSourceFeed", "DL3Feed", "make_feed"]
 
 KEYS = ["obs_id", "event_id", "tel_id"]
 
@@ -248,8 +249,25 @@ class EventSourceFeed(_ThreadedFeed):
                 return
 
 
+class DL3Feed(_ThreadedFeed):
+    """Push the events of a DL3 FITS file (`sst1mpipe_viewer.dl3`) into a store, at once"""
+
+    def __init__(self, path, store):
+        super().__init__()
+        self.path = path
+        self.store = store
+        if not store.source_description:
+            store.source_description = str(path)
+
+    def run(self):
+        """Read the file and push its events (blocking)"""
+        self.store.dl3.push(*read_dl3(self.path))
+
+
 def make_feed(path, store, rate=0.0, loop=False):
-    """`HDF5Feed` for a HDF5 file, `EventSourceFeed` for the other files"""
+    """`HDF5Feed` for a HDF5 file, `DL3Feed` for a FITS file, `EventSourceFeed` for the other files"""
     if str(path).endswith((".h5", ".hdf5")):
         return HDF5Feed(path, store, rate=rate, loop=loop)
+    if str(path).endswith((".fits", ".fits.gz")):
+        return DL3Feed(path, store)
     return EventSourceFeed(path, store, rate=rate, loop=loop)

@@ -39,7 +39,8 @@ def parse_args(argv=None):
                         help="allowed websocket origin, e.g. calculus:5006 (repeatable)")
     parser.add_argument("files", nargs="*", type=Path, metavar="FILE",
                         help="files to show: ctapipe HDF5 files (e.g. of sst1mpipe-process), all their events"
-                        " processed at once, or files read by a ctapipe EventSource (e.g. simtel), processed"
+                        " processed at once, DL3 FITS files (event lists),"
+                        " or files read by a ctapipe EventSource (e.g. simtel), processed"
                         " event by event")
     parser.add_argument("--subarray", type=Path, default=None,
                         help="HDF5 file of the subarray description: camera geometries, positions of the"
@@ -49,6 +50,8 @@ def parse_args(argv=None):
                         help="YAML configuration of the accumulated DL1 statistics (default: the one of the package)")
     parser.add_argument("--dl2-statistics-config", type=Path, default=None,
                         help="YAML configuration of the accumulated DL2 statistics (default: the one of the package)")
+    parser.add_argument("--dl3-statistics-config", type=Path, default=None,
+                        help="YAML configuration of the accumulated DL3 statistics (default: the one of the package)")
     parser.add_argument("--replay-rate", type=float, default=0.0, metavar="HZ",
                         help="push the events of the files one after the other at this rate (events per second),"
                         " as a live stream, instead of all at once")
@@ -83,7 +86,8 @@ def main(argv=None):
         log.info("Subarray %s (%s)", subarray.name, subarray_file)
 
     configs = {"dl1": load_statistics_config(args.statistics_config, "dl1"),
-               "dl2": load_statistics_config(args.dl2_statistics_config, "dl2")}
+               "dl2": load_statistics_config(args.dl2_statistics_config, "dl2"),
+               "dl3": load_statistics_config(args.dl3_statistics_config, "dl3")}
     store = ViewerStore(subarray=subarray, statistics_configs=configs)
     if args.files:
         feeds = [make_feed(path, store, rate=args.replay_rate) for path in args.files]

@@ -48,11 +48,14 @@ class Histogram1DPanel:
     ----------
     colors : dict
         Color of each telescope ``{tel_id: color}``.
+    labels : dict or None
+        Name of each series in the captions ``{tel_id: label}``, ``TEL <tel_id>`` by default.
     """
 
     def __init__(self, name, title=None, x_label=None, log_y=False, on_reset=None, width=330, height=270,
-                 colors=None):
+                 colors=None, labels=None):
         self.name = name
+        self._labels = labels or {}
         self._ranges_set = False
         self._states = {}
         self.log_y = log_y
@@ -96,8 +99,9 @@ class Histogram1DPanel:
             snapshot = snapshots.get(tel_id)
             if renderer.visible != (snapshot is not None):
                 renderer.visible = snapshot is not None
+            label = self._labels.get(tel_id, f"TEL {tel_id}")
             text = "" if snapshot is None else (
-                f"TEL {tel_id}: N={snapshot['n_entries']} mean={format_number(snapshot['mean'])}"
+                f"{label}: N={snapshot['n_entries']} mean={format_number(snapshot['mean'])}"
                 f" std={format_number(snapshot['std'])} out={snapshot['underflow']}/{snapshot['overflow']}"
             )
             if self.captions[tel_id].text != text:

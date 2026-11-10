@@ -1,7 +1,7 @@
 # sst1mpipe-viewer
 
-Bokeh viewer of the SST-1M events (R0, R1, DL0, DL1, DL2) and of the statistics accumulated from
-their DL1 and DL2 parameters, based on [ctapipe](https://github.com/cta-observatory/ctapipe) (its bokeh
+Bokeh viewer of the SST-1M events (R0, R1, DL0, DL1, DL2, DL3) and of the statistics accumulated
+from their DL1, DL2 and DL3 parameters, based on [ctapipe](https://github.com/cta-observatory/ctapipe) (its bokeh
 `CameraDisplay` and `ArrayDisplay`) and meant to show the data of
 [sst1mpipe](https://github.com/SST-1M-collaboration/sst1mpipe) in real time.
 
@@ -17,6 +17,7 @@ One web page per data level, linked by the navigation bar at the top:
 | `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations and camera maps (one plot per telescope), reset buttons (per plot, selected telescopes, all) |
 | `/dl2` | **DL2 Event** | Rate of the level in time; per selected telescope: the DL1 image with the Hillas ellipse and the **reconstructed source position** (star); the table of all the DL2 fields (energy, gammaness, direction, ...) |
 | `/dl2_statistics` | **DL2 Statistics** | Accumulated histograms of the DL2 parameters (reconstructed energy, gammaness, altitude, azimuth, disp), gammaness vs energy, reconstructed direction, source position in the camera |
+| `/dl3` | **DL3** | Gamma-ray candidates of the observations (not per telescope): table of the observations (object, target, pointing, events, livetime), rate of the events in time, energy, θ² to the target, sky map around the target, position in the field of view (DETX / DETY) |
 
 The pages opened by a browser share the selected telescopes, the displayed events and the selected
 pixels (the client id `?c=...` of the links): going from a page to another keeps the context.
@@ -153,11 +154,34 @@ in a separate process would remove this contention.
 The interface between the pipeline (files, ZMQ stream) and the viewer is not part of this package
 yet: `sst1mpipe_viewer.feeds` only reads files.
 
+### DL3
+
+A DL3 FITS file (GADF event list, as written by `sst1mpipe_data_dl2_dl3`) given on the command
+line is read at once; from Python:
+
+```python
+from sst1mpipe_viewer.dl3 import read_dl3
+
+store.dl3.push(*read_dl3("dl3_file.fits"))   # or store.dl3.push(events_table, header)
+```
+
+The columns are those of the `EVENTS` table (`TIME`, `RA`, `DEC`, `ENERGY`, `DETX`, `DETY`). The
+only values computed by the viewer are the positions of the events relative to the target of their
+observation (`RA_OBJ` / `DEC_OBJ` of the header, the pointing if missing): `offset_lon`,
+`offset_lat` and `theta2`, once when the events are pushed. To try the page without DL3 data,
+`scripts/make_synthetic_dl3.py` writes a file of **random** events:
+
+```
+python scripts/make_synthetic_dl3.py /tmp/synthetic_dl3.fits
+sst1mpipe-viewer /tmp/synthetic_dl3.fits
+```
+
 ## Statistics configuration
 
 The accumulated statistics of each data level are defined in a YAML file (defaults:
-`src/sst1mpipe_viewer/resources/dl1_statistics.yaml` and `dl2_statistics.yaml`,
-`--statistics-config` and `--dl2-statistics-config` to use others):
+`src/sst1mpipe_viewer/resources/dl1_statistics.yaml`, `dl2_statistics.yaml` and
+`dl3_statistics.yaml`; `--statistics-config`, `--dl2-statistics-config` and
+`--dl3-statistics-config` to use others):
 
 ```yaml
 hist1d:
@@ -177,9 +201,10 @@ camera:
 | `normalize.py` | Conversion of the inputs (containers, rows, tables) to columns `{name: numpy array}` |
 | `accumulators.py`, `config.py` | Histograms and camera maps, and their YAML configuration |
 | `frames.py`, `dl2.py`, `units.py` | Camera → telescope frame of the sst1mpipe parameters, DL2 column names, display units |
+| `dl3.py` | DL3 event lists: reading of the FITS files, accumulated histograms, offsets to the target |
 | `feeds.py` | Reading of files (HDF5 tables, ctapipe `EventSource`) into a store |
 | `app.py`, `server.py`, `cli.py` | Bokeh pages (header, navigation, state shared by the pages of a browser), server, command line |
-| `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2 Event), `statistics.py`, `pixel_selection.py` |
+| `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2 Event), `statistics.py`, `dl3.py`, `pixel_selection.py` |
 | `components/` | Bokeh displays independent of the store: camera, waveforms, histograms, rates, array map, fields table |
 | `pixel_groups.py`, `colors.py` | DigiCam pixel groups (from CTS), colors of the telescopes |
 

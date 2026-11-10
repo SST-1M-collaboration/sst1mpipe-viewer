@@ -45,6 +45,7 @@ from ctapipe.instrument import SubarrayDescription
 from .accumulators import CameraAccumulator
 from .config import STATISTICS_KINDS, build_statistics, load_statistics_config
 from .dl2 import add_dl2_aliases
+from .dl3 import DL3Data
 from .frames import CAMERA_FRAME_PREFIX, add_telescope_frame_parameters
 from .normalize import KEY_COLUMNS, n_rows, to_columns
 
@@ -194,7 +195,14 @@ class ViewerStore:
         self.flush_size = int(flush_size)
         self.source_description = ""
         self.version = 0  # incremented at each change
+        #: the DL3 events (not per telescope): ``store.dl3.push(events, header)``
+        self.dl3 = DL3Data(configs.get("dl3"), on_change=self._changed)
         self._clear()
+
+    def _changed(self):
+        """Mark a change of the data: the pages are refreshed"""
+        with self._lock:
+            self.version += 1
 
     def _clear(self):
         """Empty state: no event, no statistics"""
@@ -632,6 +640,7 @@ class ViewerStore:
         with self._lock:
             self._clear()
             self.version += 1
+        self.dl3.reset()
 
 
 def _histogram_rates(times):

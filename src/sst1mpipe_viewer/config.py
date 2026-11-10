@@ -24,7 +24,8 @@ STATISTICS_KINDS = ("dl1", "dl2")
 
 #: default configuration file of each data level
 DEFAULT_STATISTICS_CONFIGS = {
-    kind: files("sst1mpipe_viewer") / "resources" / f"{kind}_statistics.yaml" for kind in STATISTICS_KINDS
+    kind: files("sst1mpipe_viewer") / "resources" / f"{kind}_statistics.yaml"
+    for kind in (*STATISTICS_KINDS, "dl3")  # the DL3 statistics are not per telescope (sst1mpipe_viewer.dl3)
 }
 
 SECTIONS = ("hist1d", "hist2d", "camera")
@@ -39,7 +40,7 @@ def load_statistics_config(path=None, kind="dl1"):
     path : str, Path or None
         The YAML file; None for the default configuration of ``kind``.
     kind : str
-        The data level (``"dl1"`` or ``"dl2"``), for the default configuration.
+        The data level (``"dl1"``, ``"dl2"`` or ``"dl3"``), for the default configuration.
 
     Returns
     -------

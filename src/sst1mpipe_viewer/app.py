@@ -1,6 +1,6 @@
 """
 Bokeh documents of the viewer: one web page per data level (Array, R0, R1, DL0, DL1 Event,
-DL1 Statistics, DL2 Event, DL2 Statistics), with a header (navigation, displayed events).
+DL1 Statistics, DL2 Event, DL2 Statistics, DL3), with a header (navigation, displayed events).
 
 The pages opened by a browser share a `UserState`: the selected telescopes (chosen in the Array
 page), the displayed event of each telescope and the selected pixels. It is found by the client id
@@ -23,7 +23,7 @@ from ctapipe.coordinates import TelescopeFrame
 
 from .colors import telescope_color
 from .components import CameraPanel
-from .pages import ArrayPage, ImageEventPage, StatisticsPage, WaveformPage
+from .pages import ArrayPage, DL3Page, ImageEventPage, StatisticsPage, WaveformPage
 
 __all__ = ["PAGES", "StateRegistry", "UserState", "ViewerSession", "make_document"]
 
@@ -49,10 +49,11 @@ PAGES = {
     "dl1_statistics": ("/dl1_statistics", "DL1 Statistics", lambda session: StatisticsPage(session, "dl1")),
     "dl2": ("/dl2", "DL2 Event", lambda session: ImageEventPage(session, "dl2")),
     "dl2_statistics": ("/dl2_statistics", "DL2 Statistics", lambda session: StatisticsPage(session, "dl2")),
+    "dl3": ("/dl3", "DL3", DL3Page),
 }
 
 #: pages of accumulated statistics (refreshed less often: many figures)
-STATISTICS_PAGES = ("dl1_statistics", "dl2_statistics")
+STATISTICS_PAGES = ("dl1_statistics", "dl2_statistics", "dl3")
 
 
 @functools.cache
