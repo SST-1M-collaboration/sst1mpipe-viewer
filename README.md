@@ -120,6 +120,32 @@ sst1mpipe-viewer --stereo tests/data/mrk421_stereo.h5 --replay-speed 1
 
 replays array events: all the fields of an event are updated together (telescopes and stereo).
 
+### Live stream of the pipeline (ZMQ)
+
+The pipeline publishes the events it processes (`sst1mpipe-process --publish`, see
+`sst1mpipe.io.zmq_event_stream` of sst1mpipe, which is then needed): the viewer **binds** an
+endpoint per stream and the processes of the pipeline **connect** to it (PUB / SUB: several
+processes can publish to the same stream, the pipeline never waits for the viewer).
+
+```
+sst1mpipe-viewer --tel1 tcp://*:5561 --tel2 tcp://*:5562                 # mono mode
+sst1mpipe-process -i tcp://camera-21:24593 ... --publish tcp://viewer-host:5561
+sst1mpipe-process -i tcp://camera-22:24593 ... --publish tcp://viewer-host:5562
+
+sst1mpipe-viewer --stereo tcp://*:5563                                   # stereo mode
+```
+
+The full events (waveforms, images) are sent every second by the pipeline, the other events with
+their trigger, DL1 parameters and DL2 (the statistics and the rates have all the events). To test
+the viewer without the pipeline, `sst1mpipe-viewer-publish` publishes a file as the pipeline
+would:
+
+```
+sst1mpipe-viewer --tel1 tcp://*:5561 --tel2 tcp://*:5562
+sst1mpipe-viewer-publish tests/data/mrk421_tel21.h5 --url tcp://localhost:5561 --speed 1 --loop
+sst1mpipe-viewer-publish tests/data/mrk421_tel22.h5 --url tcp://localhost:5562 --speed 1 --loop
+```
+
 The subarray (camera geometries, positions and Earth location of the telescopes) is read from
 `--subarray FILE.h5`, by default the SST-1M subarray of sst1mpipe (`sst1m_array.h5`); the
 telescopes of the files which are not in it are added.
@@ -215,8 +241,7 @@ threads and the bokeh server share the Python interpreter (GIL): a refresh can o
 100–300 ms. Running the ingest (reading the streams, filling the statistics) in a separate
 process would remove this contention.
 
-The interface between the pipeline (files, ZMQ stream) and the viewer is not part of this package
-yet: `sst1mpipe_viewer.feeds` only reads files.
+
 
 ### DL3
 
@@ -278,7 +303,7 @@ axis of the entries. (`transform: log10` is still available to histogram the log
 | `dl2.py` | DL2: algorithms, groups of quantities and generic field names of the ctapipe `DL2Container` |
 | `rates.py` | Rates per minute with their statistical uncertainties |
 | `dl3.py` | DL3 event lists: reading of the FITS files, accumulated histograms, offsets to the target |
-| `feeds.py` | Reading of files (HDF5 tables, ctapipe `EventSource`) into a store |
+| `feeds.py`, `publish.py` | Reading of files (HDF5 tables, ctapipe `EventSource`) and of the ZMQ stream of the pipeline into a store; publishing a file as the pipeline (test tool) |
 | `app.py`, `server.py`, `cli.py` | Bokeh pages (header, navigation, state shared by the pages of a browser), server, command line |
 | `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2 Event), `statistics.py`, `stereo.py` (DL2 Stereo), `dl3.py`, `pixel_selection.py` |
 | `components/` | Bokeh displays independent of the store: camera, waveforms, histograms, rates, array map, fields table |

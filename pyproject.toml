@@ -26,6 +26,7 @@ Repository = "https://github.com/SST-1M-collaboration/sst1mpipe-viewer"
 
 [project.scripts]
 sst1mpipe-viewer = "sst1mpipe_viewer.cli:main"
+sst1mpipe-viewer-publish = "sst1mpipe_viewer.publish:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

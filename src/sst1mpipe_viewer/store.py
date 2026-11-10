@@ -210,6 +210,8 @@ class ViewerStore:
         self.max_events = int(max_events)
         self.flush_size = int(flush_size)
         self.source_description = ""
+        #: the receivers of the ZMQ streams ``{url: receiver}`` (their ``received`` and ``lost`` messages)
+        self.streams = {}
         self.version = 0  # incremented at each change
         #: the DL3 events (not per telescope): ``store.dl3.push(events, header)``
         self.dl3 = DL3Data(configs.get("dl3"), on_change=self._changed)

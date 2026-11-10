@@ -17,7 +17,9 @@ Feeds
   of the timestamps of the events to simulate a live stream;
 - `EventSourceFeed`: a file read by a ctapipe ``EventSource`` (e.g. simtel), processed and pushed
   event by event;
-- `DL3Feed`: a DL3 FITS file (event list), pushed at once.
+- `DL3Feed`: a DL3 FITS file (event list), pushed at once;
+- `ZMQFeed`: the live stream of the pipeline (``sst1mpipe-process --publish``), received with
+  ``sst1mpipe.io.zmq_event_stream``.
 
 Replay
 ------
@@ -26,11 +28,11 @@ events (`ReplayClock`, shared by the streams so that they stay synchronous: an e
 when the clock reaches its time). When a file is replayed again (``loop``), the timestamps of its
 events are shifted by the duration of the replay, so that the time keeps increasing.
 
-They are not the interface between the pipeline (e.g. its ZMQ stream) and the viewer.
 """
 
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import tables
@@ -43,7 +45,8 @@ from .dl3 import read_dl3, read_dl3_hdf5
 from .normalize import iter_rows, to_columns
 from .store import TIME_COLUMNS
 
-__all__ = ["read_tables", "ReplayClock", "HDF5Feed", "EventSourceFeed", "DL3Feed", "make_feed"]
+__all__ = ["read_tables", "ReplayClock", "HDF5Feed", "EventSourceFeed", "DL3Feed", "ZMQFeed", "is_zmq_endpoint",
+           "make_feed"]
 
 KEYS = ["obs_id", "event_id", "tel_id"]
 
@@ -444,12 +447,79 @@ def is_dl3_file(path):
     return str(path).endswith((".fits", ".fits.gz"))
 
 
+#: transports of the ZMQ endpoints
+ZMQ_TRANSPORTS = ("tcp://", "ipc://", "inproc://")
+
+
+def is_zmq_endpoint(path):
+    """Whether an input is a ZMQ endpoint (e.g. ``tcp://*:5561``) rather than a file"""
+    return str(path).startswith(ZMQ_TRANSPORTS)
+
+
+class ZMQFeed(_ThreadedFeed):
+    """
+    Push the events of a ZMQ stream of the pipeline into a store, as they arrive.
+
+    The viewer *binds* the endpoint and the processes of the pipeline (``sst1mpipe-process
+    --publish``) connect to it; see ``sst1mpipe.io.zmq_event_stream`` (sst1mpipe), which gives
+    the format of the messages and receives them.
+
+    Parameters
+    ----------
+    url : str
+        Endpoint bound by the viewer, e.g. ``tcp://*:5561``.
+    store : ViewerStore
+    tel_ids : iterable or None
+        Telescopes whose data are pushed, all if None (the stream of a telescope in mono mode).
+    stereo : bool
+        Push the stereo DL2 (False in mono mode).
+    """
+
+    #: maximum waiting time for a message (s): the feed checks whether it is stopped in between
+    POLL_TIMEOUT = 0.2
+
+    def __init__(self, url, store, tel_ids=None, stereo=True):
+        super().__init__()
+        self.path = self.url = str(url)
+        self.store = store
+        self.tel_ids = None if tel_ids is None else {int(t) for t in tel_ids}
+        self.stereo = stereo
+        self.receiver = None
+        if not store.source_description:
+            store.source_description = self.url
+
+    def push(self, levels):
+        """Push the data levels ``{level: row}`` of a message (those of the telescopes and stereo selected)"""
+        for level, row in levels.items():
+            if level == "dl2_stereo":
+                if self.stereo:
+                    self.store.push_row(level, row)
+            elif self.tel_ids is None or int(row["tel_id"]) in self.tel_ids:
+                self.store.push_row(level, row)
+
+    def run(self):
+        """Receive and push the events until the feed is stopped (blocking)"""
+        from sst1mpipe.io.zmq_event_stream import ZMQEventSubscriber
+
+        with ZMQEventSubscriber(self.url) as receiver:
+            self.receiver = receiver
+            self.store.streams[self.url] = receiver
+            while not self._stop.is_set():
+                message = receiver.receive(timeout=self.POLL_TIMEOUT)
+                if message is not None:
+                    self.push(message[1])
+
+
 def make_feed(path, store, rate=0.0, loop=False, tel_ids=None, stereo=True, clock=None):
     """
-    Feed of a file: `DL3Feed` for a FITS file, `HDF5Feed` for a HDF5 file, `EventSourceFeed` for
-    the other files. ``tel_ids`` and ``stereo`` select what is pushed (see the module): for a DL3
-    file, the events are those of the telescope ``tel_ids[0]``, of the subarray if None.
+    Feed of an input: `ZMQFeed` for a ZMQ endpoint (``tcp://...``), `DL3Feed` for a FITS file,
+    `HDF5Feed` for a HDF5 file, `EventSourceFeed` for the other files. ``tel_ids`` and ``stereo``
+    select what is pushed (see the module): for a DL3 file, the events are those of the telescope
+    ``tel_ids[0]``, of the subarray if None.
     """
+    if is_zmq_endpoint(path):
+        return ZMQFeed(path, store, tel_ids=tel_ids, stereo=stereo)
+    path = Path(path)
     if is_dl3_file(path):
         return DL3Feed(path, store, series=SUBARRAY_ID if tel_ids is None else list(tel_ids)[0])
     if str(path).endswith((".h5", ".hdf5")):

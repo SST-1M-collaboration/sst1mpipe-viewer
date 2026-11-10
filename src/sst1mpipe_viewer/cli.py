@@ -9,7 +9,7 @@ from pathlib import Path
 from ctapipe.instrument import SubarrayDescription
 
 from .config import load_statistics_config
-from .feeds import HDF5Feed, ReplayClock, make_feed
+from .feeds import HDF5Feed, ReplayClock, is_zmq_endpoint, make_feed
 from .server import serve
 from .store import ViewerStore
 
@@ -39,14 +39,15 @@ def parse_args(argv=None):
     parser.add_argument("--address", default=None, help="address of the server (default: all interfaces)")
     parser.add_argument("--allow-websocket-origin", action="append", default=None, metavar="HOST[:PORT]",
                         help="allowed websocket origin, e.g. calculus:5006 (repeatable)")
-    files = ("ctapipe HDF5 files (e.g. of sst1mpipe), DL3 FITS files (event lists) or files read by a ctapipe"
-             " EventSource (e.g. simtel)")
-    parser.add_argument("--tel1", nargs="+", type=Path, default=[], metavar="FILE",
+    files = ("ctapipe HDF5 files (e.g. of sst1mpipe), DL3 FITS files (event lists), files read by a ctapipe"
+             " EventSource (e.g. simtel), or the endpoint bound for the live stream of the pipeline"
+             " (e.g. tcp://*:5561, to which sst1mpipe-process --publish connects)")
+    parser.add_argument("--tel1", nargs="+", default=[], metavar="FILE_OR_URL",
                         help="mono mode: files of the stream of the first telescope of the subarray (only the data"
                         f" of this telescope are read, and no stereo data): {files}")
-    parser.add_argument("--tel2", nargs="+", type=Path, default=[], metavar="FILE",
+    parser.add_argument("--tel2", nargs="+", default=[], metavar="FILE_OR_URL",
                         help="mono mode: files of the stream of the second telescope of the subarray")
-    parser.add_argument("--stereo", nargs="+", type=Path, default=[], metavar="FILE",
+    parser.add_argument("--stereo", nargs="+", default=[], metavar="FILE_OR_URL",
                         help="stereo mode: files of the stream of complete array events (the data of the telescopes"
                         " and the stereo DL2), and stereo DL3 files; not with --tel1 / --tel2")
     parser.add_argument("--subarray", type=Path, default=None,
@@ -166,7 +167,7 @@ def _stream_tel_ids(store, files):
     """The telescopes of the streams 1 and 2: the first two of the subarray (of the files if the store has none)"""
     if len(store.tel_ids) < 2:
         for path in files:
-            if str(path).endswith((".h5", ".hdf5")):
+            if not is_zmq_endpoint(path) and str(path).endswith((".h5", ".hdf5")):
                 store.add_telescopes(SubarrayDescription.from_hdf(path))
     tel_ids = store.tel_ids
     if len(tel_ids) < 2:
