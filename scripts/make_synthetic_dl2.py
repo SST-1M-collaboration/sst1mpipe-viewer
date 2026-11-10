@@ -14,7 +14,7 @@ The DL2 values are random (not reconstructed). The tables are those written by t
 
 Usage::
 
-    python scripts/make_synthetic_dl2.py tests/data/mrk421_tel21_tel22.h5 /tmp/synthetic_dl2.h5
+    python scripts/make_synthetic_dl2.py my_dl1_file.h5 /tmp/synthetic_dl2.h5
     sst1mpipe-viewer --stereo /tmp/synthetic_dl2.h5
 """
 

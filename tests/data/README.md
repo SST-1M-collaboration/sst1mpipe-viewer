@@ -1,13 +1,31 @@
 # Test data
 
-`mrk421_tel21_tel22.h5` (Git LFS, 39 MB): Mrk 421 (wobble W1, 2026-01-21) observed by the two
-SST-1M telescopes, processed by sst1mpipe from the zfits test files of sst1mpipe
-(`sst1mpipe/resources/test_data/zfits`), at all the data levels:
+Mrk 421 (wobble W1, 2026-01-21) observed by the two SST-1M telescopes, processed by sst1mpipe from
+the zfits test files of sst1mpipe (`sst1mpipe/resources/test_data/zfits`), as the streams of the
+viewer (Git LFS):
 
-| Telescope | Run | DL1 (images, parameters, triggers) | R0, R1, DL0 waveforms |
-|---|---|---|---|
-| TEL 1 (`tel_id` 21) | `SST1M1_20260120_1179.fits.fz` | the first 1000 events | the first 50 events |
-| TEL 2 (`tel_id` 22) | `SST1M2_20260120_1102.fits.fz` | all the 22 events | all the 22 events |
+| File | Stream | Content |
+|---|---|---|
+| `mrk421_tel21.h5` (32 MB) | mono, `--tel1` | TEL 21, run `SST1M1_20260120_1179.fits.fz`: DL1 and DL2 of the first 1000 events, R0 / R1 / DL0 waveforms of the first 50 |
+| `mrk421_tel22.h5` (8 MB) | mono, `--tel2` | TEL 22, run `SST1M2_20260120_1102.fits.fz`: all the levels of its 22 events |
+| `mrk421_stereo.h5` (22 MB) | stereo, `--stereo` | 22 **emulated** array events: all the levels of both telescopes and a stereo DL2 |
+
+What is real and what is not:
+
+- **R0, R1, DL0, DL1 are real data** processed by sst1mpipe.
+- **The DL2 are SYNTHETIC**: the pipeline does not produce DL2 yet, so the DL2 tables hold **random
+  values, not reconstructed data** (`scripts/make_synthetic_dl2.py --seed 421`), in the ctapipe
+  format: per telescope (`/dl2/event/telescope/{geometry,impact,energy,classification,disp}/<algorithm>/tel_XXX`)
+  and, in the stereo file, `/dl2/event/subarray/{geometry,energy,classification}/<algorithm>`.
+- **The array events of the stereo file are EMULATED**: the two telescopes did not observe the same
+  showers in these runs, so the i-th event of TEL 22 is paired with the i-th event of TEL 21 and
+  takes its `obs_id`, `event_id` and time; a subarray trigger is written for these events.
+- The groups concerned carry a `SYNTHETIC` attribute saying so.
+
+`synthetic_dl3_tel21.fits`, `synthetic_dl3_tel22.fits` and `synthetic_dl3_stereo.fits` are DL3
+event lists of **random events** (`scripts/make_synthetic_dl3.py`, seeds 21, 22 and 0; a uniform
+background and an excess at the position of Mrk 421), for the DL3 page in mono and stereo modes.
+They are not derived from the Mrk 421 data.
 
 - **R0**: the DigiCam raw data of sst1mpipe (`SST1MR0CameraContainer`): ADC waveforms, DigiCam
   baseline (`pedestal`), `pixel_flags`, trigger traces.
@@ -17,21 +35,8 @@ SST-1M telescopes, processed by sst1mpipe from the zfits test files of sst1mpipe
 - **DL1**: images (`image`, `peak_time`, `image_mask`) and parameters, with the Hillas and timing
   parameters in the camera frame (`camera_frame_hillas_*`) as written by sst1mpipe.
 
-- **DL2 (SYNTHETIC)**: the pipeline does not produce DL2 yet, so the DL2 tables of the file hold
-  **random values, not reconstructed data**, written by `scripts/make_synthetic_dl2.py --seed 421`
-  in the ctapipe format, to try and test the DL2 pages: per telescope
-  (`/dl2/event/telescope/{geometry,impact,energy,classification,disp}/<algorithm>/tel_XXX`) and
-  stereo (`/dl2/event/subarray/{geometry,energy,classification}/<algorithm>`, 22 events paired at
-  random, with their subarray trigger `/dl1/event/subarray/trigger`). The groups `/dl2` and
-  `/dl1/event/subarray` carry a `SYNTHETIC` attribute saying so.
-
-`synthetic_dl3_tel21.fits`, `synthetic_dl3_tel22.fits` and `synthetic_dl3_stereo.fits` are DL3
-event lists of **random events** (`scripts/make_synthetic_dl3.py`, seeds 21, 22 and 0; a uniform
-background and an excess at the position of Mrk 421), to try and test the DL3 page in mono and
-stereo modes. They are not derived from the Mrk 421 data.
-
-The file also has the pointing and the pedestal statistics of the monitoring overlapping the
-events. The pedestal events are not in the file (they are not written by `sst1mpipe-process`).
+The files also have the pointing and the pedestal statistics of the monitoring overlapping the
+events. The pedestal events are not in the files (they are not written by `sst1mpipe-process`).
 
 ## How it was made
 
@@ -60,13 +65,21 @@ python make_mrk421_test_file.py SST1M1_20260120_1179.dl1.h5 SST1M2_20260120_1102
     -o mrk421_tel21_tel22.h5 --n-events 1000 --n-waveform-events 50
 ```
 
+The file of the two telescopes is completed with the synthetic DL2 and split into the files of
+the streams:
+
+```
+python ../../scripts/make_synthetic_dl2.py mrk421_tel21_tel22.h5 mrk421_tel21_tel22_dl2.h5 --seed 421
+python make_stream_test_files.py mrk421_tel21_tel22_dl2.h5 --output-dir .
+```
+
 ## Usage
 
 ```
 # mono mode: one stream per telescope
-sst1mpipe-viewer --tel1 tests/data/mrk421_tel21_tel22.h5 tests/data/synthetic_dl3_tel21.fits \
-                 --tel2 tests/data/mrk421_tel21_tel22.h5 tests/data/synthetic_dl3_tel22.fits
+sst1mpipe-viewer --tel1 tests/data/mrk421_tel21.h5 tests/data/synthetic_dl3_tel21.fits \
+                 --tel2 tests/data/mrk421_tel22.h5 tests/data/synthetic_dl3_tel22.fits
 
 # stereo mode: the array events, with the (synthetic) stereo DL2
-sst1mpipe-viewer --stereo tests/data/mrk421_tel21_tel22.h5 tests/data/synthetic_dl3_stereo.fits
+sst1mpipe-viewer --stereo tests/data/mrk421_stereo.h5 tests/data/synthetic_dl3_stereo.fits
 ```

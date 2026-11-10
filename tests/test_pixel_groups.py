@@ -12,7 +12,7 @@ from sst1mpipe_viewer.components import WaveformPanel
 from sst1mpipe_viewer.pixel_groups import GROUPINGS, parse_ids, pixel_groups
 from sst1mpipe_viewer.store import ViewerStore
 
-MRK421_FILE = Path(__file__).parent / "data" / "mrk421_tel21_tel22.h5"
+MRK421_FILE = Path(__file__).parent / "data" / "mrk421_tel22.h5"
 needs_file = pytest.mark.skipif(
     not MRK421_FILE.is_file() or MRK421_FILE.stat().st_size < 1000, reason="git lfs pull"
 )

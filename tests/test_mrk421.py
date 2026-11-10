@@ -15,12 +15,22 @@ from ctapipe.instrument import SubarrayDescription
 from sst1mpipe_viewer.feeds import HDF5Feed, read_tables
 from sst1mpipe_viewer.store import ViewerStore
 
-MRK421_FILE = Path(__file__).parent / "data" / "mrk421_tel21_tel22.h5"
+DATA = Path(__file__).parent / "data"
+#: one file per telescope (mono streams) and one of emulated array events (stereo stream), see data/README.md
+TEL_FILES = {21: DATA / "mrk421_tel21.h5", 22: DATA / "mrk421_tel22.h5"}
+STEREO_FILE = DATA / "mrk421_stereo.h5"
+MRK421_FILE = TEL_FILES[21]
 
 pytestmark = pytest.mark.skipif(
-    not MRK421_FILE.is_file() or MRK421_FILE.stat().st_size < 1000,
-    reason="Mrk 421 test file not available (git lfs pull)",
+    any(not path.is_file() or path.stat().st_size < 1000 for path in (*TEL_FILES.values(), STEREO_FILE)),
+    reason="Mrk 421 test files not available (git lfs pull)",
 )
+
+
+def push_telescope_files(store):
+    """Push the files of the two telescopes at once, as in mono mode"""
+    for tel_id, path in TEL_FILES.items():
+        HDF5Feed(path, store, tel_ids=[tel_id], stereo=False).run()
 
 
 @pytest.fixture(scope="module")
@@ -30,7 +40,7 @@ def subarray():
 
 @pytest.fixture(scope="module")
 def tables():
-    return read_tables(MRK421_FILE)
+    return {**read_tables(TEL_FILES[21]), **read_tables(TEL_FILES[22])}
 
 
 def test_file_content(subarray, tables):
@@ -71,7 +81,7 @@ def test_file_mode(subarray):
     event reachable with Prev / Next and by its event_id or index, all the data levels shown
     """
     store = ViewerStore()
-    HDF5Feed(MRK421_FILE, store).run()
+    push_telescope_files(store)
     statistics = store.statistics(21)
     assert statistics["n_rows"] == 1000
     assert statistics["accumulators"]["hillas_length"]["n_entries"] == 1000
@@ -169,7 +179,7 @@ def test_files_of_one_telescope_each(tmp_path, subarray):
     for tel_id in (21, 22):
         path = tmp_path / f"tel{tel_id}.h5"
         subarray.select_subarray([tel_id]).to_hdf(path)
-        tables = read_tables(MRK421_FILE, tel_ids=[tel_id])
+        tables = read_tables(TEL_FILES[tel_id], tel_ids=[tel_id])
         write_table(tables[("dl1", tel_id)][:5], path, f"/dl1/event/telescope/parameters/tel_{tel_id:03d}")
         paths.append(path)
     store = ViewerStore()
@@ -205,31 +215,40 @@ def test_streams():
     from sst1mpipe_viewer.dl2 import SUBARRAY_ID
     from sst1mpipe_viewer.feeds import HDF5Feed, ReplayClock
 
-    path = MRK421_FILE  # with synthetic DL2, per telescope and stereo (see tests/data/README.md)
+    tel21, tel22, stereo_file = str(TEL_FILES[21]), str(TEL_FILES[22]), str(STEREO_FILE)
 
     # the two modes cannot be mixed
     with pytest.raises(SystemExit):
-        parse_args(["--tel1", str(path), "--stereo", str(path)])
+        parse_args(["--tel1", tel21, "--stereo", stereo_file])
 
-    # mono: each stream pushes only its telescope, the stereo tables are not read
+    # mono: each stream pushes only its telescope and no stereo data (even from a file of array events)
     store = ViewerStore()
-    streams = make_streams(parse_args(["--tel1", str(path), "--tel2", str(path)]), store)
+    streams = make_streams(parse_args(["--tel1", tel21, "--tel2", tel22]), store)
     assert [name for name, _ in streams] == ["TEL 21", "TEL 22"]
     assert streams[0][1][0].tel_ids == [21] and not streams[0][1][0].stereo
     run_streams(streams)
     assert store.counts()[(21, "dl1")] == 1000 and store.counts()[(22, "dl1")] == 22
     assert store.event_tel_ids == [21, 22] and not store.algorithms(SUBARRAY_ID, "dl2_stereo")
     only_one = ViewerStore()
-    run_streams(make_streams(parse_args(["--tel2", str(path)]), only_one))
+    run_streams(make_streams(parse_args(["--tel2", stereo_file]), only_one))
     assert (21, "dl1") not in only_one.counts() and only_one.counts()[(22, "dl1")] == 22
+    assert only_one.event_tel_ids == [21, 22]  # no stereo events
 
     # stereo: the array events, with the data of the telescopes and the stereo DL2
     stereo = ViewerStore()
-    run_streams(make_streams(parse_args(["--stereo", str(path)]), stereo))
-    assert stereo.counts()[(21, "dl1")] == 1000 and stereo.event_tel_ids == [21, 22, SUBARRAY_ID]
+    run_streams(make_streams(parse_args(["--stereo", stereo_file]), stereo))
+    assert stereo.counts()[(21, "dl1")] == 22 and stereo.event_tel_ids == [21, 22, SUBARRAY_ID]
     assert stereo.statistics(SUBARRAY_ID, "dl2_stereo")["n_rows"] == 22
+    # an array event has the same ids and time for its telescopes and its stereo reconstruction
+    key = stereo.event_keys(SUBARRAY_ID)[3]
+    assert key in stereo.event_keys(21) and key in stereo.event_keys(22)
+    assert np.isclose(stereo.event_time(21, key), stereo.event_time(22, key), atol=1e-3)
+    array_events = HDF5Feed(stereo_file, ViewerStore()).events()
+    assert len(array_events) == 22
+    assert {kind for kind, _ in array_events[0][1]} == {"trigger", "r0", "r1", "dl0", "dl1", "dl2", "dl2_stereo"}
 
     # replay by the timestamps: the events in chronological order, the row with the time first
+    path = tel22
     feed = HDF5Feed(path, ViewerStore(), tel_ids=[22], stereo=False)
     events = feed.events()
     times = [event_time for event_time, _ in events]
@@ -253,7 +272,7 @@ def test_synthetic_dl3_files():
     from sst1mpipe_viewer.cli import make_streams, parse_args, run_streams
     from sst1mpipe_viewer.dl2 import SUBARRAY_ID
 
-    data = MRK421_FILE.parent
+    data = DATA
     mono = ViewerStore(SubarrayDescription.from_hdf(MRK421_FILE))
     run_streams(make_streams(parse_args(["--tel1", str(data / "synthetic_dl3_tel21.fits"),
                                          "--tel2", str(data / "synthetic_dl3_tel22.fits")]), mono))

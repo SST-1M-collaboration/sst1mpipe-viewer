@@ -79,16 +79,19 @@ the mono analysis of this telescope, to `--stereo` the stereo analysis), or file
 `EventSource` (e.g. `run.simtel.gz`, processed event by event with the default ctapipe configuration).
 
 ```
-sst1mpipe-viewer --tel1 tests/data/mrk421_tel21_tel22.h5 --tel2 tests/data/mrk421_tel21_tel22.h5
+sst1mpipe-viewer --tel1 tests/data/mrk421_tel21.h5 --tel2 tests/data/mrk421_tel22.h5
 ```
 
 shows the files: all their events are processed at once (the statistics are those of all the
 events) and the first event of each telescope is shown; any event can then be reached with Prev /
-Next or its event id. The Mrk 421 test file has the R0, R1, DL0 and DL1 data of the two SST-1M
-telescopes processed by sst1mpipe (see `tests/data/README.md`; `git lfs pull` to get it).
+Next or its event id. The Mrk 421 test files (`tests/data/README.md`; `git lfs pull` to get them)
+have the R0, R1, DL0 and DL1 data of the two SST-1M telescopes processed by sst1mpipe, one file
+per telescope, and a file of emulated array events for the stereo mode; their DL2 and the DL3
+files hold **random values** (the pipeline does not produce them yet).
 
 ```
-sst1mpipe-viewer --tel1 tel21.h5 --tel2 tel22.h5 --replay-speed 1 --loop
+sst1mpipe-viewer --tel1 tests/data/mrk421_tel21.h5 tests/data/synthetic_dl3_tel21.fits \
+                 --tel2 tests/data/mrk421_tel22.h5 tests/data/synthetic_dl3_tel22.fits --replay-speed 1 --loop
 ```
 
 replays the events as live streams, in the order and at the pace of their timestamps (`1`: real
@@ -98,7 +101,7 @@ their timestamps being shifted at each pass so that the time keeps increasing. `
 replays at a fixed rate instead (e.g. 1000 for a load test).
 
 ```
-sst1mpipe-viewer --stereo array_events.h5 --replay-speed 1
+sst1mpipe-viewer --stereo tests/data/mrk421_stereo.h5 tests/data/synthetic_dl3_stereo.fits --replay-speed 1
 ```
 
 replays array events: all the fields of an event are updated together (telescopes and stereo).
@@ -163,7 +166,7 @@ The pipeline does not produce DL2 yet: to try the DL2 pages, `scripts/make_synth
 writes a copy of a DL1 file with **random** DL2 values in the ctapipe format (telescope and stereo):
 
 ```
-python scripts/make_synthetic_dl2.py tests/data/mrk421_tel21_tel22.h5 /tmp/synthetic_dl2.h5
+python scripts/make_synthetic_dl2.py my_dl1_file.h5 /tmp/synthetic_dl2.h5
 sst1mpipe-viewer --stereo /tmp/synthetic_dl2.h5
 ```
 
