@@ -197,20 +197,15 @@ def test_replay_rate(subarray):
     assert 100 < rate < 550, rate
 
 
-def test_streams(tmp_path):
+def test_streams():
     """Mono mode: one stream per telescope, no stereo data; stereo mode: one stream of array events"""
-    import subprocess
-    import sys
     import time
 
     from sst1mpipe_viewer.cli import make_streams, parse_args, run_streams
     from sst1mpipe_viewer.dl2 import SUBARRAY_ID
     from sst1mpipe_viewer.feeds import HDF5Feed, ReplayClock
 
-    # a file with stereo DL2 (synthetic)
-    path = tmp_path / "dl2.h5"
-    script = Path(__file__).parent.parent / "scripts" / "make_synthetic_dl2.py"
-    subprocess.run([sys.executable, str(script), str(MRK421_FILE), str(path)], check=True, capture_output=True)
+    path = MRK421_FILE  # with synthetic DL2, per telescope and stereo (see tests/data/README.md)
 
     # the two modes cannot be mixed
     with pytest.raises(SystemExit):
@@ -251,3 +246,18 @@ def test_streams(tmp_path):
     assert replayed.event_time(22, replayed.latest_key(22)) > last
     rate_times, rates, _ = replayed.rate_history(22, "trigger")
     assert rate_times[-1] > last and rates.max() > 0
+
+
+def test_synthetic_dl3_files():
+    """The synthetic DL3 files: one series per telescope in mono mode, the subarray in stereo mode"""
+    from sst1mpipe_viewer.cli import make_streams, parse_args, run_streams
+    from sst1mpipe_viewer.dl2 import SUBARRAY_ID
+
+    data = MRK421_FILE.parent
+    mono = ViewerStore(SubarrayDescription.from_hdf(MRK421_FILE))
+    run_streams(make_streams(parse_args(["--tel1", str(data / "synthetic_dl3_tel21.fits"),
+                                         "--tel2", str(data / "synthetic_dl3_tel22.fits")]), mono))
+    assert mono.dl3.series() == [21, 22] and mono.dl3.statistics(21)["n_rows"] == 4400
+    stereo = ViewerStore()
+    run_streams(make_streams(parse_args(["--stereo", str(data / "synthetic_dl3_stereo.fits")]), stereo))
+    assert stereo.dl3.series() == [SUBARRAY_ID]

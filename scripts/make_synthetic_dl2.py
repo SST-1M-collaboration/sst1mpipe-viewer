@@ -27,6 +27,8 @@ from astropy.table import Table
 from ctapipe.io import read_table, write_table
 
 KEYS = ("obs_id", "event_id", "tel_id")
+#: attribute written on the synthetic groups of the output file
+SYNTHETIC_NOTE = "Random values written by sst1mpipe-viewer/scripts/make_synthetic_dl2.py: NOT reconstructed data"
 
 
 def telescope_tables(dl1, rng):
@@ -142,6 +144,10 @@ def main():
         write_table(table, args.output, f"/dl2/event/subarray/{group}/{algorithm}", overwrite=True)
     write_table(stereo_trigger, args.output, "/dl1/event/subarray/trigger", overwrite=True)
     print(f"subarray: {len(smallest)} synthetic stereo DL2 rows")
+    # mark the DL2 of the file as synthetic
+    with tables.open_file(args.output, "a") as f:
+        f.root.dl2._v_attrs.SYNTHETIC = SYNTHETIC_NOTE
+        f.root.dl1.event.subarray._v_attrs.SYNTHETIC = SYNTHETIC_NOTE
 
 
 if __name__ == "__main__":
