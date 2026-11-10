@@ -111,6 +111,11 @@ def test_mean_waveform_of_many_pixels():
     assert np.allclose(panel.source.data["ys"][0], waveforms.mean(axis=0))
     panel.set_waveforms(waveforms, [1, 2])
     assert panel.source.data["pixel"] == ["1", "2"]
+    # the 12 pixels of a module are all drawn, the mean from 13 pixels
+    panel.set_waveforms(waveforms, list(range(12)))
+    assert len(panel.source.data["pixel"]) == 12 and len(set(panel.source.data["color"])) == 12
+    panel.set_waveforms(waveforms, list(range(13)))
+    assert panel.source.data["pixel"] == ["mean of 13 pixels"]
 
 
 @needs_file

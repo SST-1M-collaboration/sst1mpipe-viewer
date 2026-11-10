@@ -12,7 +12,7 @@ One web page per data level, linked by the navigation bar at the top:
 | Path | Page | Content |
 |---|---|---|
 | `/` | **Array** | **Selection of the telescopes** (check boxes, or click on a telescope of the map), each with its color used in all the pages; telescopes on an OpenStreetMap map at their Earth location (or in the ground frame); data received per telescope and data level, and **their rates in time** (one plot per telescope, one line per data level); **pixel selection by group**, one per telescope, of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
-| `/r0`, `/r1`, `/dl0` | **R0 / R1 / DL0** | Rate of the level in time; one block per selected telescope, with its own ◀ / ▶ (events of this telescope only) and its own **sample** slider, common to the waveform camera and the trigger traces: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 10 pixels), the camera of a per-pixel field chosen in a menu (the fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels, traces of the patches of the selected pixels); the table of all the fields, one column per telescope |
+| `/r0`, `/r1`, `/dl0` | **R0 / R1 / DL0** | Rate of the level in time; one block per selected telescope, with its own ◀ / ▶ (events of this telescope only) and its own **sample** slider, common to the waveform camera and the trigger traces: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 12 pixels: the 12 pixels of a module are all drawn), the camera of a per-pixel field chosen in a menu (the fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels, traces of the patches of the selected pixels); the table of all the fields, one column per telescope |
 | `/dl1` | **DL1 Event** | Rate of the level in time; per selected telescope (with its own ◀ / ▶): image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse; the table of all the DL1 and trigger fields |
 | `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations (one plot per telescope), reset buttons (per plot, selected telescopes, all) |
 | `/dl2` | **DL2 Event** | Rate of the level in time; per selected telescope: the DL1 image with the Hillas ellipse, and the table of **all the DL2 fields of the telescope** (every algorithm: geometry, energy, classification, impact, disp, with their uncertainties, validity and goodness of fit) |
@@ -64,25 +64,44 @@ in an environment with ctapipe 0.32 (e.g. the sst1mpipe environment).
 
 ## Usage
 
+The data come from **streams**, in one of two modes:
+
+- **mono mode**: one stream per telescope, `--tel1` for the first telescope of the subarray
+  (TEL 21) and `--tel2` for the second (TEL 22). Only the data of the telescope are read from its
+  files, and no stereo data: the DL2 Stereo page stays empty.
+- **stereo mode**: `--stereo`, one stream of complete array events: the data of all the
+  telescopes and the stereo DL2 are read.
+
+The two modes cannot be mixed (the events of the telescopes would be counted twice): the viewer
+refuses to start with `--stereo` and `--tel1` / `--tel2`. Each option takes one or several files:
+ctapipe HDF5 files (of `ctapipe-process` or sst1mpipe), DL3 FITS files (a DL3 given to `--tel1` is
+the mono analysis of this telescope, to `--stereo` the stereo analysis), or files read by a ctapipe
+`EventSource` (e.g. `run.simtel.gz`, processed event by event with the default ctapipe configuration).
+
 ```
-sst1mpipe-viewer tests/data/mrk421_tel21_tel22.h5
+sst1mpipe-viewer --tel1 tests/data/mrk421_tel21_tel22.h5 --tel2 tests/data/mrk421_tel21_tel22.h5
 ```
 
-shows a file: all its events are processed at once (the DL1 statistics are those of all the
-events of the file) and its first event is shown, any event can then be reached with Prev / Next
-or its event id. The Mrk 421 test file has the R0, R1, DL0 and DL1 data of the two SST-1M
-telescopes processed by sst1mpipe (see `tests/data/README.md`; `git lfs pull` to get it). Any
-ctapipe HDF5 file written by `ctapipe-process` or `sst1mpipe-process` can be shown, several
-files are read one after the other.
+shows the files: all their events are processed at once (the statistics are those of all the
+events) and the first event of each telescope is shown; any event can then be reached with Prev /
+Next or its event id. The Mrk 421 test file has the R0, R1, DL0 and DL1 data of the two SST-1M
+telescopes processed by sst1mpipe (see `tests/data/README.md`; `git lfs pull` to get it).
 
 ```
-sst1mpipe-viewer tests/data/mrk421_tel21_tel22.h5 --replay-rate 1000 --loop
+sst1mpipe-viewer --tel1 tel21.h5 --tel2 tel22.h5 --replay-speed 1 --loop
 ```
 
-replays the events of the file one after the other at 1 kHz, as a live stream: the displays
-follow the last event and the statistics are accumulated. A file read by a ctapipe
-`EventSource` (e.g. `run.simtel.gz`) is processed event by event (calibration and DL1 parameters
-with the default ctapipe configuration).
+replays the events as live streams, in the order and at the pace of their timestamps (`1`: real
+time, `10`: ten times faster): the streams share a clock and stay synchronous, the displays follow
+the last events and the statistics are accumulated. With `--loop` the files are replayed endlessly,
+their timestamps being shifted at each pass so that the time keeps increasing. `--replay-rate HZ`
+replays at a fixed rate instead (e.g. 1000 for a load test).
+
+```
+sst1mpipe-viewer --stereo array_events.h5 --replay-speed 1
+```
+
+replays array events: all the fields of an event are updated together (telescopes and stereo).
 
 The subarray (camera geometries, positions and Earth location of the telescopes) is read from
 `--subarray FILE.h5`, by default the SST-1M subarray of sst1mpipe (`sst1m_array.h5`); the
@@ -145,7 +164,7 @@ writes a copy of a DL1 file with **random** DL2 values in the ctapipe format (te
 
 ```
 python scripts/make_synthetic_dl2.py tests/data/mrk421_tel21_tel22.h5 /tmp/synthetic_dl2.h5
-sst1mpipe-viewer /tmp/synthetic_dl2.h5
+sst1mpipe-viewer --stereo /tmp/synthetic_dl2.h5
 ```
 
 ### Event rate
@@ -164,7 +183,7 @@ Pushing an event is cheap, so that the viewer follows streams of more than 1 kHz
 - a user action (click, menu, Prev / Next) is applied at once, without waiting for the next
   refresh; the changes of a refresh are sent to the browser in one message.
 
-Measured with the Mrk 421 file (with synthetic DL2) replayed at 1 kHz (`--replay-rate 1000 --loop`):
+Measured with the Mrk 421 file (with synthetic DL2) replayed at 1 kHz (`--stereo FILE --replay-rate 1000 --loop`):
 
 | | file (no stream) | stream at 1 kHz |
 |---|---|---|
@@ -183,12 +202,14 @@ yet: `sst1mpipe_viewer.feeds` only reads files.
 ### DL3
 
 A DL3 FITS file (GADF event list, as written by `sst1mpipe_data_dl2_dl3`) given on the command
-line is read at once; from Python:
+line is read at once. The DL3 are accumulated per *series*: one per telescope in mono mode (two
+superimposed histograms, one map per telescope), a single one in stereo mode. From Python:
 
 ```python
 from sst1mpipe_viewer.dl3 import read_dl3
 
-store.dl3.push(*read_dl3("dl3_file.fits"))   # or store.dl3.push(events_table, header)
+store.dl3.push(*read_dl3("dl3_file.fits"))             # stereo analysis
+store.dl3.push(*read_dl3("dl3_tel21.fits"), series=21)  # mono analysis of TEL 21
 ```
 
 The columns are those of the `EVENTS` table (`TIME`, `RA`, `DEC`, `ENERGY`, `DETX`, `DETY`). The
@@ -199,7 +220,7 @@ observation (`RA_OBJ` / `DEC_OBJ` of the header, the pointing if missing): `offs
 
 ```
 python scripts/make_synthetic_dl3.py /tmp/synthetic_dl3.fits
-sst1mpipe-viewer /tmp/synthetic_dl3.fits
+sst1mpipe-viewer --stereo /tmp/synthetic_dl3.fits
 ```
 
 ## Statistics configuration

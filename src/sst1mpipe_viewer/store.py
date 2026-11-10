@@ -74,6 +74,9 @@ DL2_KINDS = ("dl2", "dl2_stereo")
 RATE_WINDOW = 10.0
 #: number of bins (minutes) of the rate histories of the live data: 24 hours
 RATE_HISTORY_BINS = 1440
+#: an event pushed again with a timestamp differing by more than this (s) is the event of a new pass of a
+#: replay in loop (the times of the levels of an event, e.g. trigger and R0, can differ slightly)
+REPLAY_TIME_SHIFT = 0.5
 #: number of the last events pushed of each telescope whose timestamp and counted levels are remembered
 RATE_EVENTS = 5000
 #: number of rows converted to the telescope frame kept for the display
@@ -292,27 +295,41 @@ class ViewerStore:
         tel_id = SUBARRAY_ID if kind == "dl2_stereo" else tel_id
         self._push_event_rows(kind, to_columns(row, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
 
-    def push_event(self, event):
+    def push_event(self, event, tel_ids=None, stereo=True):
         """
         Push the data of a ctapipe ``ArrayEventContainer``: the R0, R1, DL0, DL1, DL2 and
         trigger containers of its telescopes, and its stereo DL2.
+
+        Parameters
+        ----------
+        event : ctapipe.containers.ArrayEventContainer
+        tel_ids : iterable or None
+            Telescopes whose data are pushed, all if None (e.g. the telescope of a mono stream).
+        stereo : bool
+            Push the stereo DL2 (False for a mono stream).
         """
         keys = dict(obs_id=event.index.obs_id, event_id=event.index.event_id)
+        wanted = None if tel_ids is None else {int(t) for t in tel_ids}
+        # the trigger first: it has the time of the event, used to count its levels in the rates
+        for tel_id, container in event.trigger.tel.items():
+            if wanted is None or tel_id in wanted:
+                columns = to_columns(container, tel_id=tel_id, **keys)
+                columns.update(to_columns({"event_type": event.trigger.event_type}))
+                self._push_event_rows("trigger", columns)
         for kind in ("r0", "r1", "dl0", "dl1"):
             for tel_id, container in getattr(event, kind).tel.items():
-                self.push_container(kind, container, tel_id=tel_id, **keys)
+                if wanted is None or tel_id in wanted:
+                    self.push_container(kind, container, tel_id=tel_id, **keys)
         for tel_id, reconstructed in event.dl2.tel.items():
-            row = container_row(reconstructed)
+            row = container_row(reconstructed) if wanted is None or tel_id in wanted else None
             if row:
                 self.push_row("dl2", row, tel_id=tel_id, **keys)
+        if not stereo:
+            return
         row = container_row(event.dl2.stereo, stereo=True)
         if row:
             # the time of the event, for the stereo rate (the telescopes have it in their trigger)
             self.push_row("dl2_stereo", {**row, "time": event.trigger.time}, **keys)
-        for tel_id, container in event.trigger.tel.items():
-            columns = to_columns(container, tel_id=tel_id, **keys)
-            columns.update(to_columns({"event_type": event.trigger.event_type}))
-            self._push_event_rows("trigger", columns)
 
     def push_table(self, kind, table, *, obs_id=None, event_id=None, tel_id=None):
         """
@@ -384,6 +401,11 @@ class ViewerStore:
         self._latest_valid[(tel_id, kind)] = key
         events = self._rate_events.setdefault(tel_id, OrderedDict())
         entry = events.get(key)
+        if (entry is not None and event_time is not None and entry[0] is not None
+                and abs(event_time - entry[0]) > REPLAY_TIME_SHIFT):
+            # the same ids at another time: the event of another pass of a replay in loop
+            del events[key]
+            entry = None
         if entry is None:
             entry = events[key] = [None, set(), set()]
             while len(events) > RATE_EVENTS:

@@ -9,11 +9,11 @@ from pathlib import Path
 from ctapipe.instrument import SubarrayDescription
 
 from .config import load_statistics_config
-from .feeds import make_feed
+from .feeds import HDF5Feed, ReplayClock, make_feed
 from .server import serve
 from .store import ViewerStore
 
-__all__ = ["main", "default_subarray_file"]
+__all__ = ["main", "default_subarray_file", "make_streams", "run_streams"]
 
 log = logging.getLogger("sst1mpipe_viewer")
 
@@ -31,17 +31,24 @@ def parse_args(argv=None):
     """Options of the command line (``argv``: the arguments, those of the command if None)"""
     parser = argparse.ArgumentParser(
         prog="sst1mpipe-viewer",
-        description="Bokeh viewer of the SST-1M events (R0, R1, DL0, DL1, DL2) and of their accumulated statistics.",
+        description="Bokeh viewer of the SST-1M events (R0 to DL3) and of their accumulated statistics. The data come"
+        " either from one stream per telescope (mono mode: --tel1, --tel2) or from one stream of array events"
+        " (stereo mode: --stereo).",
     )
     parser.add_argument("--port", type=int, default=5006, help="port of the server (default: %(default)s)")
     parser.add_argument("--address", default=None, help="address of the server (default: all interfaces)")
     parser.add_argument("--allow-websocket-origin", action="append", default=None, metavar="HOST[:PORT]",
                         help="allowed websocket origin, e.g. calculus:5006 (repeatable)")
-    parser.add_argument("files", nargs="*", type=Path, metavar="FILE",
-                        help="files to show: ctapipe HDF5 files (e.g. of sst1mpipe-process), all their events"
-                        " processed at once, DL3 FITS files (event lists),"
-                        " or files read by a ctapipe EventSource (e.g. simtel), processed"
-                        " event by event")
+    files = ("ctapipe HDF5 files (e.g. of sst1mpipe), DL3 FITS files (event lists) or files read by a ctapipe"
+             " EventSource (e.g. simtel)")
+    parser.add_argument("--tel1", nargs="+", type=Path, default=[], metavar="FILE",
+                        help="mono mode: files of the stream of the first telescope of the subarray (only the data"
+                        f" of this telescope are read, and no stereo data): {files}")
+    parser.add_argument("--tel2", nargs="+", type=Path, default=[], metavar="FILE",
+                        help="mono mode: files of the stream of the second telescope of the subarray")
+    parser.add_argument("--stereo", nargs="+", type=Path, default=[], metavar="FILE",
+                        help="stereo mode: files of the stream of complete array events (the data of the telescopes"
+                        " and the stereo DL2), and stereo DL3 files; not with --tel1 / --tel2")
     parser.add_argument("--subarray", type=Path, default=None,
                         help="HDF5 file of the subarray description: camera geometries, positions of the"
                         " telescopes (default: the SST-1M subarray of sst1mpipe, sst1m_array.h5); the"
@@ -55,10 +62,14 @@ def parse_args(argv=None):
                         " package)")
     parser.add_argument("--dl3-statistics-config", type=Path, default=None,
                         help="YAML configuration of the accumulated DL3 statistics (default: the one of the package)")
+    parser.add_argument("--replay-speed", type=float, default=0.0, metavar="FACTOR",
+                        help="replay the events of the files in the order and at the pace of their timestamps, as"
+                        " live streams (1: real time, 10: ten times faster), instead of all at once")
     parser.add_argument("--replay-rate", type=float, default=0.0, metavar="HZ",
                         help="push the events of the files one after the other at this rate (events per second),"
                         " as a live stream, instead of all at once")
-    parser.add_argument("--loop", action="store_true", help="with --replay-rate, replay the files endlessly")
+    parser.add_argument("--loop", action="store_true",
+                        help="replay the files endlessly (the timestamps are shifted at each pass)")
     parser.add_argument("--refresh-period", type=int, default=250,
                         help="period of the check for changes in ms (default: %(default)s)")
     parser.add_argument("--event-period", type=float, default=0.5,
@@ -72,7 +83,13 @@ def parse_args(argv=None):
     parser.add_argument("--color-scale", choices=["lin", "log"], default="lin",
                         help="color scale of the cameras (default: %(default)s)")
     parser.add_argument("--show", action="store_true", help="open the viewer in a browser")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.stereo and (args.tel1 or args.tel2):
+        parser.error("--stereo (stream of array events) cannot be used with --tel1 / --tel2 (mono streams):"
+                     " the events of the telescopes would be counted twice")
+    if args.replay_speed > 0 and args.replay_rate > 0:
+        parser.error("--replay-speed and --replay-rate cannot be used together")
+    return args
 
 
 def main(argv=None):
@@ -93,14 +110,11 @@ def main(argv=None):
                "dl2_stereo": load_statistics_config(args.dl2_stereo_statistics_config, "dl2_stereo"),
                "dl3": load_statistics_config(args.dl3_statistics_config, "dl3")}
     store = ViewerStore(subarray=subarray, statistics_configs=configs)
-    if args.files:
-        feeds = [make_feed(path, store, rate=args.replay_rate) for path in args.files]
-        store.source_description = ", ".join(str(path) for path in args.files) + (
-            f" (replay at {args.replay_rate:g} Hz)" if args.replay_rate > 0 else "")
-        # the files are read one after the other, in the background: the server starts at once
-        thread = threading.Thread(target=run_feeds, args=(feeds, args.loop and args.replay_rate > 0),
-                                  name="sst1mpipe-viewer-files", daemon=True)
-        thread.start()
+    streams = make_streams(args, store)
+    if streams:
+        # the files are read in the background: the server starts at once
+        threading.Thread(target=run_streams, args=(streams, args.replay_speed, args.loop),
+                         name="sst1mpipe-viewer-streams", daemon=True).start()
 
     log.info("SST-1M viewer at http://%s:%d/", args.address or "localhost", args.port)
     serve(store, port=args.port, address=args.address, allow_websocket_origin=args.allow_websocket_origin,
@@ -109,15 +123,100 @@ def main(argv=None):
           color_scale=args.color_scale)
 
 
-def run_feeds(feeds, loop=False):
-    """Run the feeds one after the other, endlessly with ``loop`` (the files replayed one after the other)"""
+def make_streams(args, store):
+    """
+    The streams of the command line.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Options with ``tel1``, ``tel2``, ``stereo`` (lists of files), ``replay_rate`` and ``loop``.
+    store : ViewerStore
+        The store filled by the streams (its ``source_description`` is set).
+
+    Returns
+    -------
+    list of (str, list of feeds)
+        Name and feeds of each stream: one per telescope in mono mode (its feeds push only the
+        data of the telescope, and no stereo data), or the stream of array events in stereo mode.
+    """
+    if args.stereo:
+        selections = [("stereo", args.stereo, None)]
+    else:
+        tel_ids = _stream_tel_ids(store, [*args.tel1, *args.tel2])
+        selections = [(f"TEL {tel_id}", files, [tel_id])
+                      for tel_id, files in zip(tel_ids, (args.tel1, args.tel2)) if files]
+    streams = []
+    for name, files, tel_ids in selections:
+        feeds = [make_feed(path, store, rate=args.replay_rate, tel_ids=tel_ids, stereo=tel_ids is None)
+                 for path in files]
+        streams.append((name, feeds))
+    replay = (f" (replay at {args.replay_rate:g} Hz)" if args.replay_rate > 0
+              else f" (replay at speed {args.replay_speed:g})" if args.replay_speed > 0 else "")
+    store.source_description = " &nbsp;|&nbsp; ".join(
+        f"{name}: {', '.join(str(path) for path in files)}" for name, files, _ in selections) + replay
+    return streams
+
+
+def _stream_tel_ids(store, files):
+    """The telescopes of the streams 1 and 2: the first two of the subarray (of the files if the store has none)"""
+    if len(store.tel_ids) < 2:
+        for path in files:
+            if str(path).endswith((".h5", ".hdf5")):
+                store.add_telescopes(SubarrayDescription.from_hdf(path))
+    tel_ids = store.tel_ids
+    if len(tel_ids) < 2:
+        raise SystemExit("The telescopes of --tel1 / --tel2 are unknown: give the subarray with --subarray")
+    return tel_ids[:2]
+
+
+def run_streams(streams, speed=0.0, loop=False):
+    """
+    Run the streams, each in its own thread (blocking until they end).
+
+    Parameters
+    ----------
+    streams : list of (str, list of feeds)
+        The streams (`make_streams`).
+    speed : float
+        Replay the events at the pace of their timestamps, with this speed factor: the streams
+        share a clock (`sst1mpipe_viewer.feeds.ReplayClock`) and stay synchronous. 0: the feeds
+        use their own setting (tables at once, or fixed rate).
+    loop : bool
+        Replay the files of each stream endlessly.
+    """
+    if speed > 0:
+        replayed = [feed for _, feeds in streams for feed in feeds if isinstance(feed, HDF5Feed)]
+        ranges = [time_range for feed in replayed if (time_range := feed.time_range()) is not None]
+        if ranges:
+            start, stop = min(r[0] for r in ranges), max(r[1] for r in ranges)
+            clock = ReplayClock(start, stop - start, speed)
+            for feed in replayed:
+                feed.clock = clock
+    threads = [threading.Thread(target=_run_stream, args=(name, feeds, loop), name=f"sst1mpipe-viewer-{name}",
+                                daemon=True) for name, feeds in streams]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+
+def _run_stream(name, feeds, loop):
+    """Run the feeds of a stream one after the other; with ``loop``, replay those which are replays endlessly"""
+    pass_index = 0
     while True:
+        replayed = False
         for feed in feeds:
             try:
-                feed.run()
+                if getattr(feed, "is_replay", False):
+                    feed.replay(pass_index)
+                    replayed = True
+                elif pass_index == 0:
+                    feed.run()
             except Exception:
-                log.exception("Cannot read %s", feed.path)
-        if not loop:
+                log.exception("Stream %s: cannot read %s", name, feed.path)
+        pass_index += 1
+        if not (loop and replayed):
             return
 
 

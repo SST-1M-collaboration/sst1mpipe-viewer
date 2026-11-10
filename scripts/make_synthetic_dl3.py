@@ -8,7 +8,7 @@ at the position of the target (Mrk 421), observed in wobble mode (pointing 0.7 d
 Usage::
 
     python scripts/make_synthetic_dl3.py /tmp/synthetic_dl3.fits
-    sst1mpipe-viewer /tmp/synthetic_dl3.fits
+    sst1mpipe-viewer --stereo /tmp/synthetic_dl3.fits
 """
 
 import argparse

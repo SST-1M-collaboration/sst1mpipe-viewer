@@ -4,6 +4,7 @@ from astropy.io import fits
 from astropy.table import Table
 from conftest import Browser
 
+from sst1mpipe_viewer.dl2 import SUBARRAY_ID
 from sst1mpipe_viewer.dl3 import DL3Data, read_dl3, target_offsets, unix_times
 from sst1mpipe_viewer.feeds import make_feed
 from sst1mpipe_viewer.store import ViewerStore
@@ -64,15 +65,33 @@ def test_dl3_file_and_page(tmp_path, subarray):
 
     store = ViewerStore(subarray)
     version = store.version
-    make_feed(path, store).run()
+    make_feed(path, store).run()  # a stereo analysis: the series of the subarray
     assert store.version > version
     session = Browser(store)
     page = next(p for p in session.pages if p.title == "DL3")
     page.refresh()
     assert page.observations_source.data["n_events"] == [200]
-    assert page.observations_source.data["rate"] == ["2"]
-    assert page.hist1d[0].captions["all"].text.startswith("All observations: N=200")
-    assert page.hist2d[0].source.data["image"]
+    assert page.observations_source.data["rate"] == ["2"] and page.observations_source.data["series"] == ["Subarray"]
+    assert page.hist1d[0].captions[SUBARRAY_ID].text.startswith("Subarray: N=200")
+    assert page.hist2d[("sky", SUBARRAY_ID)].source.data["image"]
+    assert len(page.maps.children[0].children) == 1
     page._reset()
     page.refresh()  # done at once by the session in a browser
     assert page.observations_source.data["n_events"] == []
+
+
+def test_dl3_per_telescope(subarray):
+    """Mono analysis: one DL3 series per telescope, superimposed histograms and one map per telescope"""
+    store = ViewerStore(subarray)
+    store.dl3.push(events_table(100), HEADER, series=1)
+    store.dl3.push(events_table(40, seed=2), HEADER, series=2)
+    assert store.dl3.series() == [1, 2]
+    assert store.dl3.statistics(1)["accumulators"]["energy"]["n_entries"] == 100
+    assert store.dl3.statistics(2)["accumulators"]["energy"]["n_entries"] == 40
+    page = next(p for p in Browser(store).pages if p.title == "DL3")
+    page.refresh()
+    assert page.observations_source.data["series"] == ["TEL 1", "TEL 2"]
+    energy = page.hist1d[0]
+    assert energy.captions[1].text.startswith("TEL 1: N=100") and energy.captions[2].text.startswith("TEL 2: N=40")
+    assert not energy.renderers[SUBARRAY_ID].visible
+    assert len(page.maps.children[0].children) == 2  # one sky map per telescope

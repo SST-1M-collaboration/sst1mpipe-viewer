@@ -195,3 +195,59 @@ def test_replay_rate(subarray):
     assert store.has_event_data
     # not faster than asked; slower only if the machine is very busy
     assert 100 < rate < 550, rate
+
+
+def test_streams(tmp_path):
+    """Mono mode: one stream per telescope, no stereo data; stereo mode: one stream of array events"""
+    import subprocess
+    import sys
+    import time
+
+    from sst1mpipe_viewer.cli import make_streams, parse_args, run_streams
+    from sst1mpipe_viewer.dl2 import SUBARRAY_ID
+    from sst1mpipe_viewer.feeds import HDF5Feed, ReplayClock
+
+    # a file with stereo DL2 (synthetic)
+    path = tmp_path / "dl2.h5"
+    script = Path(__file__).parent.parent / "scripts" / "make_synthetic_dl2.py"
+    subprocess.run([sys.executable, str(script), str(MRK421_FILE), str(path)], check=True, capture_output=True)
+
+    # the two modes cannot be mixed
+    with pytest.raises(SystemExit):
+        parse_args(["--tel1", str(path), "--stereo", str(path)])
+
+    # mono: each stream pushes only its telescope, the stereo tables are not read
+    store = ViewerStore()
+    streams = make_streams(parse_args(["--tel1", str(path), "--tel2", str(path)]), store)
+    assert [name for name, _ in streams] == ["TEL 21", "TEL 22"]
+    assert streams[0][1][0].tel_ids == [21] and not streams[0][1][0].stereo
+    run_streams(streams)
+    assert store.counts()[(21, "dl1")] == 1000 and store.counts()[(22, "dl1")] == 22
+    assert store.event_tel_ids == [21, 22] and not store.algorithms(SUBARRAY_ID, "dl2_stereo")
+    only_one = ViewerStore()
+    run_streams(make_streams(parse_args(["--tel2", str(path)]), only_one))
+    assert (21, "dl1") not in only_one.counts() and only_one.counts()[(22, "dl1")] == 22
+
+    # stereo: the array events, with the data of the telescopes and the stereo DL2
+    stereo = ViewerStore()
+    run_streams(make_streams(parse_args(["--stereo", str(path)]), stereo))
+    assert stereo.counts()[(21, "dl1")] == 1000 and stereo.event_tel_ids == [21, 22, SUBARRAY_ID]
+    assert stereo.statistics(SUBARRAY_ID, "dl2_stereo")["n_rows"] == 22
+
+    # replay by the timestamps: the events in chronological order, the row with the time first
+    feed = HDF5Feed(path, ViewerStore(), tel_ids=[22], stereo=False)
+    events = feed.events()
+    times = [event_time for event_time, _ in events]
+    assert len(events) == 22 and times == sorted(times)
+    assert {"time", "event_time"} & set(events[0][1][0][1])
+    first, last = feed.time_range()
+    # ... 100 times faster than real time, in loop: the timestamps of the second pass are shifted
+    replayed = ViewerStore()
+    feed = HDF5Feed(path, replayed, tel_ids=[22], stereo=False, loop=True,
+                    clock=ReplayClock(first, last - first, speed=100.0)).start()
+    time.sleep(1.0)
+    feed.stop()
+    assert replayed.has_event_data and replayed.counts()[(22, "dl1")] > 22
+    assert replayed.event_time(22, replayed.latest_key(22)) > last
+    rate_times, rates, _ = replayed.rate_history(22, "trigger")
+    assert rate_times[-1] > last and rates.max() > 0

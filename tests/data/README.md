@@ -50,5 +50,5 @@ python make_mrk421_test_file.py SST1M1_20260120_1179.dl1.h5 SST1M2_20260120_1102
 ## Usage
 
 ```
-sst1mpipe-viewer tests/data/mrk421_tel21_tel22.h5
+sst1mpipe-viewer --tel1 tests/data/mrk421_tel21_tel22.h5 --tel2 tests/data/mrk421_tel21_tel22.h5
 ```

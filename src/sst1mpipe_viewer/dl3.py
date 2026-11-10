@@ -4,8 +4,9 @@ by ``sst1mpipe_data_dl2_dl3``).
 
 A DL3 file has an ``EVENTS`` table (``EVENT_ID``, ``TIME``, ``RA``, ``DEC``, ``ENERGY``, ``DETX``,
 ``DETY``) and a header describing the observation (``OBS_ID``, ``OBJECT``, ``RA_OBJ``, ``DEC_OBJ``,
-``RA_PNT``, ``DEC_PNT``, ``LIVETIME``, ...). Unlike the other data levels, the DL3 are not per
-telescope: `DL3Data` accumulates the events of all the observations pushed to it.
+``RA_PNT``, ``DEC_PNT``, ``LIVETIME``, ...). `DL3Data` accumulates the events of all the
+observations pushed to it, per *series*: one per telescope for a mono analysis (one DL3 file per
+telescope), or a single one for a stereo analysis.
 
 The only values computed by the viewer are the positions of the events relative to the target of
 their observation (``offset_lon``, ``offset_lat``, ``theta2``), once when the events are pushed.
@@ -19,6 +20,7 @@ import numpy as np
 from astropy.table import Table
 
 from .config import build_statistics, load_statistics_config
+from .dl2 import SUBARRAY_ID
 from .rates import binned_rates
 
 __all__ = ["DL3Data", "read_dl3", "target_offsets", "unix_times"]
@@ -88,6 +90,9 @@ class DL3Data:
     The DL3 events received: accumulated histograms (energy, theta^2, sky map, field of view),
     a summary of each observation and the rate of the events in time.
 
+    The events are accumulated per *series*: the telescope of a mono analysis (one DL3 file per
+    telescope), or `SUBARRAY_ID` for a stereo analysis.
+
     Parameters
     ----------
     config : dict or None
@@ -100,12 +105,16 @@ class DL3Data:
         self.config = config if config is not None else load_statistics_config(kind="dl3")
         self._on_change = on_change
         self._lock = threading.Lock()
-        self._statistics = build_statistics(self.config)
-        self._observations = {}  # obs_id -> summary (dict)
-        self._times = []  # unix times of the events, one array per push
-        self._rates = None  # cached (times, rates, errors)
+        self._clear()
 
-    def push(self, events, header=None):
+    def _clear(self):
+        """Empty state: no event"""
+        self._statistics = {}  # series -> StatisticsSet
+        self._observations = {}  # (series, obs_id) -> summary (dict)
+        self._times = {}  # series -> list of arrays of unix times of the events (one per push)
+        self._rates = {}  # series -> cached (times, rates, errors)
+
+    def push(self, events, header=None, series=SUBARRAY_ID):
         """
         Add the events of an observation.
 
@@ -117,6 +126,8 @@ class DL3Data:
         header : dict or None
             Header of the table (``OBS_ID``, ``OBJECT``, ``RA_OBJ``, ``DEC_OBJ``, ``LIVETIME``, ...);
             the ``meta`` of the table if None.
+        series : int
+            The telescope of the events (mono analysis), `SUBARRAY_ID` for a stereo analysis.
         """
         events = events if isinstance(events, Table) else Table(events)
         header = dict(events.meta) if header is None else dict(header)
@@ -136,12 +147,14 @@ class DL3Data:
         times = unix_times(columns["time"], header) if "time" in columns else np.empty(0)
 
         with self._lock:
+            if series not in self._statistics:
+                self._statistics[series] = build_statistics(self.config)
             if n:
-                self._statistics.fill(columns)
-            self._times.append(times)
-            self._rates = None
+                self._statistics[series].fill(columns)
+            self._times.setdefault(series, []).append(times)
+            self._rates.pop(series, None)
             obs_id = header.get("OBS_ID", len(self._observations))
-            summary = self._observations.setdefault(obs_id, dict(obs_id=obs_id, n_events=0))
+            summary = self._observations.setdefault((series, obs_id), dict(series=series, obs_id=obs_id, n_events=0))
             summary["n_events"] += n
             summary.update(
                 object=str(header.get("OBJECT", "")),
@@ -154,34 +167,41 @@ class DL3Data:
         if self._on_change is not None:
             self._on_change()
 
+    def series(self):
+        """The series with events (telescope ids, `SUBARRAY_ID`), sorted with the subarray last"""
+        with self._lock:
+            return sorted(self._statistics, key=lambda s: (s == SUBARRAY_ID, s))
+
     def observations(self):
-        """Summaries of the observations received (list of dict), in the order received"""
+        """Summaries of the observations received (list of dict, with their ``series``), in the order received"""
         with self._lock:
             return [dict(summary) for summary in self._observations.values()]
 
-    def statistics(self):
-        """Snapshot of the histograms (see `StatisticsSet.snapshot`)"""
+    def statistics(self, series=SUBARRAY_ID):
+        """Snapshot of the histograms of a series (see `StatisticsSet.snapshot`), empty histograms if unknown"""
         with self._lock:
-            return self._statistics.snapshot()
+            statistics = self._statistics.get(series)
+            return (statistics if statistics is not None else build_statistics(self.config)).snapshot()
 
-    def rate_history(self):
+    def rate_history(self, series=SUBARRAY_ID):
         """
-        Rate of the events in time, per minute: (centre of the bins in unix s, events per second,
-        statistical uncertainties), see `sst1mpipe_viewer.rates`
+        Rate of the events of a series in time, per minute: (centre of the bins in unix s, events
+        per second, statistical uncertainties), see `sst1mpipe_viewer.rates`
         """
         with self._lock:
-            if self._rates is None:
-                self._rates = binned_rates(np.concatenate(self._times) if self._times else np.empty(0))
-            return self._rates
+            if series not in self._rates:
+                times = self._times.get(series)
+                self._rates[series] = binned_rates(np.concatenate(times) if times else np.empty(0))
+            return self._rates[series]
 
     def reset(self, name=None):
-        """Forget the events received (or reset one histogram ``name`` only)"""
+        """Forget the events received (or reset one histogram ``name`` only, for all the series)"""
         with self._lock:
-            self._statistics.reset(name)
             if name is None:
-                self._observations = {}
-                self._times = []
-                self._rates = None
+                self._clear()
+            else:
+                for statistics in self._statistics.values():
+                    statistics.reset(name)
         if self._on_change is not None:
             self._on_change()
 

@@ -2,13 +2,16 @@
 
 import numpy as np
 from bokeh.models import ColumnDataSource, HoverTool, Legend, LegendItem, Span
-from bokeh.palettes import Category10_10
+from bokeh.palettes import Paired12
 from bokeh.plotting import figure
 
 __all__ = ["WaveformPanel", "waveform_2d"]
 
 TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
-MAX_PIXELS = len(Category10_10)
+#: colors of the waveforms: 12, so that the 12 pixels of a module are all drawn
+COLORS = Paired12
+#: more pixels than this are shown by their mean waveform
+MAX_PIXELS = len(COLORS)
 
 
 def waveform_2d(waveform, channel=0):
@@ -67,7 +70,7 @@ class WaveformPanel:
                                 ["black"])
             return
 
-        colors = [Category10_10[i % MAX_PIXELS] for i in range(len(pixels))]
+        colors = [COLORS[i % MAX_PIXELS] for i in range(len(pixels))]
         self._set_baselines(samples, None if baselines is None else np.asarray(baselines, dtype=float)[pixels], colors)
         self.source.data = dict(
             xs=[samples] * len(pixels),

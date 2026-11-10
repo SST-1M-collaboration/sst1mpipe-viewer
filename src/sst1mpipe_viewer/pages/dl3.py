@@ -1,9 +1,11 @@
 """
 DL3 page: the gamma-ray candidates of the observations (`sst1mpipe_viewer.dl3`).
 
-Unlike the other pages, the DL3 are not per telescope: the page shows the observations received,
-the rate of their events in time and the accumulated histograms (energy, theta^2 to the target,
-sky map around the target, position in the field of view).
+The page shows the observations received, the rate of their events in time and the accumulated
+histograms (energy, theta^2 to the target, sky map around the target, position in the field of
+view). In a mono analysis (one DL3 file per telescope) there is one series per telescope, with
+its color: the 1D histograms are superimposed and the maps are side by side. In a stereo analysis
+there is a single series, that of the subarray.
 """
 
 from astropy.time import Time
@@ -13,15 +15,14 @@ from bokeh.models import Button, ColumnDataSource, DataTable, Div, TableColumn
 from ..components import Histogram1DPanel, Histogram2DPanel, RatePanel
 from ..components.histogram import format_number
 from ..config import display_options
+from ..dl2 import SUBARRAY_ID
 from .base import Page
 from .statistics import axis_label
 
 __all__ = ["DL3Page"]
 
-#: color of the DL3 plots (the DL3 are not per telescope)
-COLOR = "#7b3294"
-#: key of the single series of the plots
-ALL = "all"
+#: color of the stereo DL3 plots
+STEREO_COLOR = "#7b3294"
 
 
 def _position(position):
@@ -35,7 +36,7 @@ def _time(unix):
 
 
 class DL3Page(Page):
-    """The DL3 events of all the observations: observations table, rate in time, histograms"""
+    """The DL3 events of the observations: observations table, rate in time, histograms per series"""
 
     title = "DL3"
 
@@ -43,9 +44,15 @@ class DL3Page(Page):
         super().__init__(session)
         config = self.store.dl3.config
         options = display_options(config)
+        # the possible series: each telescope (mono analysis) and the subarray (stereo analysis)
+        all_series = [*session.all_tel_ids, SUBARRAY_ID]
+        colors = {s: STEREO_COLOR if s == SUBARRAY_ID else session.color(s) for s in all_series}
+        labels = {s: session.tel_label(s) for s in all_series}
+        self._labels = labels
         self.observations_source = ColumnDataSource(data=self._observations([]))
-        self.observations = DataTable(source=self.observations_source, index_position=None, width=1100, height=90,
+        self.observations = DataTable(source=self.observations_source, index_position=None, width=1200, height=110,
                                       columns=[
+            TableColumn(field="series", title="Analysis", width=90),
             TableColumn(field="obs_id", title="Observation", width=110),
             TableColumn(field="object", title="Object", width=110),
             TableColumn(field="target", title="Target RA, Dec (deg)", width=150),
@@ -56,28 +63,35 @@ class DL3Page(Page):
             TableColumn(field="start", title="First event", width=150),
             TableColumn(field="stop", title="Last event", width=150),
         ])
-        self.rates = RatePanel("Rate of the DL3 events per minute", {ALL: ("DL3 events", COLOR)}, width=1100,
-                               height=220)
+        self.rates = RatePanel("Rate of the DL3 events per minute", {s: (labels[s], colors[s]) for s in all_series},
+                               width=1100, height=220)
         self.hist1d = [
             Histogram1DPanel(
                 spec.get("name", spec["column"]), title=spec.get("title", spec["column"]),
                 x_label=axis_label(spec["column"], spec.get("transform"), spec.get("unit")),
-                on_reset=self._reset, colors={ALL: COLOR}, labels={ALL: "All observations"}, width=480,
-                height=320, **options[spec.get("name", spec["column"])],
+                on_reset=self._reset, colors=colors, labels=labels, width=480, height=320,
+                **options[spec.get("name", spec["column"])],
             )
             for spec in config.get("hist1d", ())
         ]
-        self.hist2d = []
+        # the maps: one per series
+        self.hist2d = {}
         for spec in config.get("hist2d", ()):
-            panel = Histogram2DPanel(
-                spec.get("name", f"{spec['y']}_vs_{spec['x']}"), title=spec.get("title"),
-                x_label=axis_label(spec["x"], spec.get("x_transform"), "deg"),
-                y_label=axis_label(spec["y"], spec.get("y_transform"), "deg"), on_reset=self._reset,
-                width=480, height=420,
-            )
-            # the origin: the target (sky map) or the centre of the field of view
-            panel.figure.scatter(x=[0], y=[0], marker="cross", size=16, line_color="#e53935", line_width=2)
-            self.hist2d.append(panel)
+            name = spec.get("name", f"{spec['y']}_vs_{spec['x']}")
+            for series in all_series:
+                panel = Histogram2DPanel(
+                    name, title=f"{spec.get('title') or name} – {labels[series]}",
+                    x_label=axis_label(spec["x"], spec.get("x_transform"), "deg"),
+                    y_label=axis_label(spec["y"], spec.get("y_transform"), "deg"), on_reset=self._reset,
+                    width=480, height=420, **options[name],
+                )
+                panel.figure.title.text_color = colors[series]
+                # the origin: the target (sky map) or the centre of the field of view
+                panel.figure.scatter(x=[0], y=[0], marker="cross", size=16, line_color="#e53935", line_width=2)
+                self.hist2d[(name, series)] = panel
+        self._hist2d_names = list(dict.fromkeys(name for name, _ in self.hist2d))
+        self.maps = column()
+        self._shown_series = None
         self.reset_all = Button(label="Reset the DL3 data", width=160, button_type="danger")
         self.reset_all.on_click(lambda: self._reset())
         self.layout = column(
@@ -85,7 +99,7 @@ class DL3Page(Page):
             row(self.observations, self.reset_all),
             self.rates.layout,
             row([p.layout for p in self.hist1d]),
-            row([p.layout for p in self.hist2d]),
+            self.maps,
         )
 
     def _reset(self, name=None):
@@ -93,13 +107,13 @@ class DL3Page(Page):
         self.store.dl3.reset(name)
         self.session.request_refresh()
 
-    @staticmethod
-    def _observations(observations):
+    def _observations(self, observations):
         """Columns of the observations table from the summaries of `DL3Data.observations`"""
-        data = {key: [] for key in ("obs_id", "object", "target", "pointing", "n_events", "livetime", "rate",
-                                    "start", "stop")}
+        data = {key: [] for key in ("series", "obs_id", "object", "target", "pointing", "n_events", "livetime",
+                                    "rate", "start", "stop")}
         for summary in observations:
             livetime = summary["livetime"]
+            data["series"].append(self._labels.get(summary["series"], str(summary["series"])))
             data["obs_id"].append(str(summary["obs_id"]))
             data["object"].append(summary["object"] or "–")
             data["target"].append(_position(summary["target"]))
@@ -111,15 +125,27 @@ class DL3Page(Page):
             data["stop"].append(_time(summary["stop"]))
         return data
 
+    def _set_layout(self, series):
+        """Maps of the series with events (the layout changes only when the series change)"""
+        if series == self._shown_series:
+            return
+        self._shown_series = series
+        self.maps.children = [row([self.hist2d[(name, s)].layout for s in series]) for name in self._hist2d_names]
+        for panel in self.hist1d:
+            panel.invalidate()
+
     def refresh(self):
-        """Show the observations, the rate and the histograms of the DL3 data"""
+        """Show the observations, the rates and the histograms of the series with DL3 events"""
         dl3 = self.store.dl3
+        series = [s for s in dl3.series() if s in self._labels]  # the telescopes known when the page was built
+        self._set_layout(series)
         data = self._observations(dl3.observations())
         if data != self.observations_source.data:
             self.observations_source.data = data
-        self.rates.update({ALL: dl3.rate_history()})
-        accumulators = dl3.statistics()["accumulators"]
+        self.rates.update({s: dl3.rate_history(s) for s in series}, visible=series)
+        accumulators = {s: dl3.statistics(s)["accumulators"] for s in series}
         for panel in self.hist1d:
-            panel.update({ALL: accumulators[panel.name]})
-        for panel in self.hist2d:
-            panel.update(accumulators[panel.name])
+            panel.update({s: accumulators[s][panel.name] for s in series})
+        for (name, s), panel in self.hist2d.items():
+            if s in accumulators:
+                panel.update(accumulators[s][name])
