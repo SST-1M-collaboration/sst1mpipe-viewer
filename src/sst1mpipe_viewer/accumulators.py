@@ -15,7 +15,6 @@ __all__ = [
     "Accumulator",
     "Histogram1D",
     "Histogram2D",
-    "CameraAccumulator",
     "StatisticsSet",
     "make_bins",
 ]
@@ -217,62 +216,6 @@ class Histogram2D(Accumulator):
     def snapshot(self):
         """Copy of the accumulated state, for the display"""
         return dict(x_edges=self.x_edges, y_edges=self.y_edges, counts=self.counts.copy(), n_entries=self.n_entries)
-
-
-class CameraAccumulator(Accumulator):
-    """
-    Per pixel accumulation of an image column (rows of shape ``(n_pixels,)``):
-    ``mean`` (mean value of each pixel) or ``fraction`` (fraction of the rows in which
-    the pixel is true or non zero, e.g. the fraction of the events in which a pixel
-    survives the cleaning with ``image_mask``).
-    """
-
-    MODES = ("mean", "fraction")
-
-    def __init__(self, name, column, n_pixels, mode="mean", unit="", **kwargs):
-        super().__init__(name, **kwargs)
-        if mode not in self.MODES:
-            raise ValueError(f"Unknown mode {mode!r}, known: {self.MODES}")
-        self.column = column
-        self.n_pixels = int(n_pixels)
-        self.mode = mode
-        self.unit = unit
-        self._reset()
-
-    @property
-    def columns(self):
-        """Columns needed to fill the accumulator"""
-        return (self.column,)
-
-    def accepts(self, columns):
-        """Whether the columns have the image column, with ``n_pixels`` values per row"""
-        value = columns.get(self.column)
-        return value is not None and np.ndim(value) == 2 and np.shape(value)[1] == self.n_pixels
-
-    def _reset(self):
-        """Set the accumulated state to empty (implemented by each accumulator)"""
-        self._sum = np.zeros(self.n_pixels)
-        self._n = np.zeros(self.n_pixels, dtype=np.int64)
-
-    def _fill(self, images):
-        """Add the values of the columns of the accumulator (implemented by each accumulator)"""
-        images = np.asarray(images, dtype=float)
-        finite = np.isfinite(images)
-        if self.mode == "fraction":
-            images = (images != 0).astype(float)
-        self._sum += np.where(finite, images, 0.0).sum(axis=0)
-        self._n += finite.sum(axis=0)
-        self.n_entries += len(images)
-
-    @property
-    def values(self):
-        """Accumulated value of each pixel (NaN for the pixels without entries)"""
-        with np.errstate(invalid="ignore", divide="ignore"):
-            return np.where(self._n > 0, self._sum / np.maximum(self._n, 1), np.nan)
-
-    def snapshot(self):
-        """Copy of the accumulated state, for the display"""
-        return dict(values=self.values, n_entries=self.n_entries)
 
 
 class StatisticsSet:

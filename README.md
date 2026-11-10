@@ -14,7 +14,7 @@ One web page per data level, linked by the navigation bar at the top:
 | `/` | **Array** | **Selection of the telescopes** (check boxes, or click on a telescope of the map), each with its color used in all the pages; telescopes on an OpenStreetMap map at their Earth location (or in the ground frame); data received per telescope and data level, and **their rates in time** (one plot per telescope, one line per data level); **pixel selection by group**, one per telescope, of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`) |
 | `/r0`, `/r1`, `/dl0` | **R0 / R1 / DL0** | Rate of the level in time; one block per selected telescope, with its own ◀ / ▶ (events of this telescope only) and its own **sample** slider, common to the waveform camera and the trigger traces: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 10 pixels), the camera of a per-pixel field chosen in a menu (the fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels, traces of the patches of the selected pixels); the table of all the fields, one column per telescope |
 | `/dl1` | **DL1 Event** | Rate of the level in time; per selected telescope (with its own ◀ / ▶): image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse; the table of all the DL1 and trigger fields |
-| `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations and camera maps (one plot per telescope), reset buttons (per plot, selected telescopes, all) |
+| `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations (one plot per telescope), reset buttons (per plot, selected telescopes, all) |
 | `/dl2` | **DL2 Event** | Rate of the level in time; per selected telescope: the DL1 image with the Hillas ellipse, and the table of **all the DL2 fields of the telescope** (every algorithm: geometry, energy, classification, impact, disp, with their uncertainties, validity and goodness of fit) |
 | `/dl2_statistics` | **DL2 Statistics** | Per telescope, **the algorithm of each group chosen in a menu** (geometry, energy, classification, impact, disp): reconstructed energy and its uncertainty, gammaness, altitude, azimuth, impact distance, disp, validity flags; gammaness vs energy, direction, impact vs energy |
 | `/dl2_stereo` | **DL2 Stereo** | The stereo reconstruction of the subarray (not per telescope): rate; the displayed stereo event with its own ◀ / ▶ (reconstructed core on the ground with the telescopes, those used ringed, and the table of all its fields); statistics of all the stereo events with the algorithm menus (energy, gammaness, direction, h_max, core map, ...) |
@@ -37,10 +37,19 @@ header:
   a telescope name: of this telescope only);
 - **Event id**: an `event_id`, or `#index` for the index of the event (`#0` the first, `#-1` the last).
 
-The rates are shown per minute, with error bars for their statistical uncertainty (√N / duration):
-by time of arrival for the data pushed event by event (the last 24 hours, the current minute
-included), by time of the events for a file (the trigger times of its events). A dashed vertical
-line marks the time of the displayed event of each telescope.
+**Valid levels.** A data level of an event is *valid* if (`sst1mpipe_viewer/validity.py`, the place
+to change the rule): R0 / R1 / DL0 have a `waveform`; DL1 has Hillas parameters (finite
+`hillas_intensity`); DL2 has at least one algorithm with `is_valid` true.
+
+**Rates.** The rate of a level is the number of events whose level is valid, per minute, computed
+from the timestamps of the events (trigger `time` or `event_time`; the events without timestamp
+are not counted), with error bars for the statistical uncertainty (√N / duration). A dashed
+vertical line marks the time of the displayed event of each telescope.
+
+**Blurred displays.** In Live mode a page shows the last event whose level is valid. When this is
+not the current event of the telescope (e.g. the last event has no R1, or its DL1 has no Hillas
+parameters), or when browsing an event without this level, the last displays are kept **blurred**
+with a message: what is shown is not the current event.
 
 The color maps are not chosen in the pages (lighter pages) but on the command line: `--colormap`
 (waveform and image cameras), `--field-colormap` (per-pixel fields), `--color-scale lin|log`.
@@ -207,8 +216,6 @@ hist1d:
   - {column: hillas_width, range: [0, 0.4], bins: 50, unit: deg}
 hist2d:
   - {x: hillas_intensity, x_log: true, x_range: [10, 100000], x_bins: 40, y: hillas_length, y_range: [0, 1], y_bins: 40}
-camera:
-  - {column: image_mask, mode: fraction}
 ```
 
 `log_x: true` gives logarithmic bins (of the values themselves, in `range`) drawn on a logarithmic
@@ -221,7 +228,7 @@ axis of the entries. (`transform: log10` is still available to histogram the log
 |---|---|
 | `store.py` | `ViewerStore`: the data received (events, tables) and the accumulated statistics; the input of the viewer |
 | `normalize.py` | Conversion of the inputs (containers, rows, tables) to columns `{name: numpy array}` |
-| `accumulators.py`, `config.py` | Histograms and camera maps, and their YAML configuration |
+| `accumulators.py`, `config.py` | Histograms and their YAML configuration |
 | `frames.py`, `units.py` | Camera → telescope frame of the sst1mpipe parameters, display units |
 | `dl2.py` | DL2: algorithms, groups of quantities and generic field names of the ctapipe `DL2Container` |
 | `rates.py` | Rates per minute with their statistical uncertainties |

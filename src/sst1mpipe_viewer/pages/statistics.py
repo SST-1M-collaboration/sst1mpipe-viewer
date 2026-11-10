@@ -42,7 +42,7 @@ class StatisticsPage(Page):
     Accumulated histograms of a data level for the selected telescopes:
 
     - the 1D histograms of the telescopes are superimposed, each with the color of its telescope;
-    - the 2D histograms (correlations) and the camera maps have one plot per telescope.
+    - the 2D histograms (correlations) have one plot per telescope.
 
     Parameters
     ----------
@@ -85,7 +85,7 @@ class StatisticsPage(Page):
             )
             for spec in config.get("hist1d", ())
         ]
-        # 2D histograms and camera maps: one per telescope
+        # 2D histograms: one per telescope
         self.hist2d = {}
         for spec in config.get("hist2d", ()):
             name = spec.get("name", f"{spec['y']}_vs_{spec['x']}")
@@ -99,19 +99,6 @@ class StatisticsPage(Page):
                 panel.figure.title.text_color = colors[tel_id]
                 self.hist2d[(name, tel_id)] = panel
         self._hist2d_names = list(dict.fromkeys(name for name, _ in self.hist2d))
-        maps = {spec.get("name", f"{spec['column']}_{spec.get('mode', 'mean')}"): spec.get("title", spec["column"])
-                for spec in config.get("camera", ())}
-        self.map_titles = maps
-        self.camera_map = Select(title="Camera map", value=next(iter(maps), ""), options=list(maps), width=420)
-        self.camera_map.on_change("value", lambda attr, old, new: self._refresh_maps(force=True))
-        self.maps = {}
-        if maps and not self.stereo:
-            for tel_id in all_tel_ids:
-                panel = session.camera_panel(geometry=session.geometry(tel_id), title="",
-                                             on_pixel_click=session.pixel_click(tel_id), width=420, height=380)
-                panel.figure.title.text_color = colors[tel_id]
-                self.maps[tel_id] = panel
-        self._map_states = {}
         self._snapshots = {}
 
         # a table, not a Div: changing a Div lays out the whole page again (slow)
@@ -127,7 +114,6 @@ class StatisticsPage(Page):
         self.reset_all.on_click(lambda: self._reset_all())
         self.legend = Div(text="", height=24)
         self.correlations = column()
-        self.maps_row = row()
         self._shown_tel_ids = None
 
         self.reset_tel.visible = not self.stereo
@@ -142,8 +128,6 @@ class StatisticsPage(Page):
         ]
         if self.hist2d:
             sections += [_section("Correlations"), self.correlations]
-        if maps:
-            sections += [_section("Camera maps"), self.camera_map, self.maps_row]
         self.layout = column(*sections)
 
     # ---------------------------------------------------------------- resets
@@ -205,7 +189,6 @@ class StatisticsPage(Page):
             row([self.hist2d[(name, t)].layout for t in tel_ids if (name, t) in self.hist2d])
             for name in self._hist2d_names
         ]
-        self.maps_row.children = [self.maps[t].layout for t in tel_ids if t in self.maps]
         for panel in self.hist1d:
             panel.invalidate()
 
@@ -227,24 +210,3 @@ class StatisticsPage(Page):
             for name in self._hist2d_names:
                 if name in snapshot["accumulators"] and (name, tel_id) in self.hist2d:
                     self.hist2d[(name, tel_id)].update(snapshot["accumulators"][name])
-        self._refresh_maps()
-
-    def _refresh_maps(self, force=False):
-        """Camera maps of the selected telescopes (redrawn only when their statistics changed)"""
-        session = self.session
-        name = self.camera_map.value
-        for tel_id, snapshot in self._snapshots.items():
-            panel = self.maps.get(tel_id)
-            geometry = session.geometry(tel_id)
-            accumulator = snapshot["accumulators"].get(name)
-            if panel is None or geometry is None or accumulator is None \
-                    or len(accumulator["values"]) != geometry.n_pixels:
-                continue
-            state = (name, accumulator["n_entries"])
-            if force or state != self._map_states.get(tel_id):
-                self._map_states[tel_id] = state
-                panel.set_geometry(geometry)
-                panel.set_image(accumulator["values"])
-                panel.set_title(f"{self.map_titles.get(name, name)} – TEL {tel_id}")
-                panel.set_caption(f"N={accumulator['n_entries']}")
-            panel.set_selected(session.selected_pixels(tel_id))

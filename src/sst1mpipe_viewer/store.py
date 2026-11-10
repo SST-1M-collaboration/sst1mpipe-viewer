@@ -28,10 +28,11 @@ image row and a DL1 parameter row, or a R1 row and its trigger row.
 
 Rates
 -----
-The number of rows received per second is kept for each telescope and data level
-(`rate_history`), per minute with its statistical uncertainty (`sst1mpipe_viewer.rates`): by time
-of arrival for the rows pushed event by event (the last 24 hours), by time of the events for the
-tables (the trigger time of their events).
+The rate of each telescope and data level (`rate_history`) is the number of events whose level is
+*valid* (`sst1mpipe_viewer.validity`) per second, computed from the timestamps of the events (the
+``time`` of their trigger row or the ``event_time`` of their R0 / R1 / DL0 row), per minute with
+its statistical uncertainty (`sst1mpipe_viewer.rates`). The events without timestamp are not in
+the rates.
 """
 
 import threading
@@ -44,7 +45,6 @@ from astropy.time import Time
 from ctapipe.coordinates import GroundFrame
 from ctapipe.instrument import SubarrayDescription
 
-from .accumulators import CameraAccumulator
 from .config import STATISTICS_KINDS, build_statistics, load_statistics_config
 from .dl2 import (
     SUBARRAY_ID,
@@ -59,6 +59,7 @@ from .dl3 import DL3Data
 from .frames import CAMERA_FRAME_PREFIX, add_telescope_frame_parameters
 from .normalize import KEY_COLUMNS, n_rows, to_columns
 from .rates import RATE_BIN, binned_rates, live_rates
+from .validity import container_is_valid, row_is_valid, valid_rows
 
 __all__ = ["KINDS", "ViewerStore"]
 
@@ -73,6 +74,8 @@ DL2_KINDS = ("dl2", "dl2_stereo")
 RATE_WINDOW = 10.0
 #: number of bins (minutes) of the rate histories of the live data: 24 hours
 RATE_HISTORY_BINS = 1440
+#: number of the last events pushed of each telescope whose timestamp and counted levels are remembered
+RATE_EVENTS = 5000
 #: number of rows converted to the telescope frame kept for the display
 CONVERTED_CACHE_SIZE = 64
 #: columns with the time of the events (unix seconds in the tables)
@@ -126,12 +129,12 @@ class _Tables:
     def __init__(self):
         self.keys = []
         self.positions = {}  # key -> position in keys
-        self.kinds = {}  # kind -> list of (columns, {key: row})
+        self.kinds = {}  # kind -> list of (columns, {key: row}, valid rows)
         self.times = {}  # key -> time of the event (unix s), from the tables with a time column
         self.version = 0  # incremented at each table added
 
-    def add(self, kind, columns):
-        """Add a table of a data level (its columns)"""
+    def add(self, kind, columns, valid):
+        """Add a table of a data level (its columns, and which of its rows are valid)"""
         keys = list(zip(np.asarray(columns["obs_id"]).astype(int).tolist(),
                         np.asarray(columns["event_id"]).astype(int).tolist()))
         rows = {}
@@ -140,18 +143,30 @@ class _Tables:
             if key not in self.positions:
                 self.positions[key] = len(self.keys)
                 self.keys.append(key)
-        self.kinds.setdefault(kind, []).append((columns, rows))
+        self.kinds.setdefault(kind, []).append((columns, rows, valid))
         time_column = next((name for name in TIME_COLUMNS if name in columns), None)
         if time_column is not None and np.issubdtype(np.asarray(columns[time_column]).dtype, np.number):
             self.times.update(zip(keys, np.asarray(columns[time_column], dtype=float).tolist()))
         self.version += 1
 
     def event_times(self, kind):
-        """Times (unix s) of the events of the tables of a data level (from any table with times)"""
+        """Times (unix s) of the events whose data level is valid (NaN for the events without time)"""
         times = []
-        for _, rows in self.kinds.get(kind, ()):
-            times += [self.times.get(key, np.nan) for key in rows]
+        for _, rows, valid in self.kinds.get(kind, ()):
+            times += [self.times.get(key, np.nan) for key, is_valid in zip(rows, valid) if is_valid]
         return np.asarray(times, dtype=float)
+
+    def last_valid_key(self, kind):
+        """Key of the last event whose data level is valid, None if none"""
+        best = None
+        for columns, _, valid in self.kinds.get(kind, ()):
+            indices = np.flatnonzero(valid)
+            if len(indices) == 0:
+                continue
+            key = (int(columns["obs_id"][indices[-1]]), int(columns["event_id"][indices[-1]]))
+            if best is None or self.positions[key] > self.positions[best]:
+                best = key
+        return best
 
     def event(self, key, kinds=None):
         """Rows ``{kind: row}`` of an event (of the data levels ``kinds``, all if None)"""
@@ -159,24 +174,10 @@ class _Tables:
         for kind, tables in self.kinds.items():
             if kinds is not None and kind not in kinds:
                 continue
-            for columns, rows in tables:
+            for columns, rows, _ in tables:
                 if key in rows:
                     result[kind] = {**result.get(kind, {}), **_row(columns, rows[key])}
         return result
-
-    def last_key_with(self, kind, column):
-        """Last key whose ``kind`` row has a finite ``column``"""
-        best = None
-        for columns, rows in self.kinds.get(kind, ()):
-            if column not in columns:
-                continue
-            finite = np.flatnonzero(np.isfinite(np.asarray(columns[column], dtype=float)))
-            if len(finite) == 0:
-                continue
-            key = (int(columns["obs_id"][finite[-1]]), int(columns["event_id"][finite[-1]]))
-            if best is None or self.positions[key] > self.positions[best]:
-                best = key
-        return best
 
 
 class ViewerStore:
@@ -223,8 +224,12 @@ class ViewerStore:
         self._latest = {}  # (tel_id, kind) -> (obs_id, event_id)
         self._counts = Counter()  # (tel_id, kind) -> number of rows received
         self._arrivals = {}  # (tel_id, kind) -> deque of [time, n rows] of the last RATE_WINDOW s
-        self._history = {}  # (tel_id, kind) -> {minute (unix time // RATE_BIN): n rows received}
-        self._history_start = {}  # (tel_id, kind) -> time of arrival of the first row (unix s)
+        self._latest_valid = {}  # (tel_id, kind) -> (obs_id, event_id) of the last event with a valid level
+        self._history = {}  # (tel_id, kind) -> {minute (event time // RATE_BIN): n valid events}
+        self._history_start = {}  # (tel_id, kind) -> time of the first valid event (unix s)
+        self._last_time = {}  # tel_id -> time of the last event pushed (unix s)
+        # tel_id -> OrderedDict[(obs_id, event_id) -> [time or None, levels counted, levels waiting for the time]]
+        self._rate_events = {}
         self._table_history = {}  # (tel_id, kind) -> (tables version, (times, rates, errors)), cache
         # (kind, tel_id, combination of DL2 algorithms or None) -> StatisticsSet
         self._statistics = {}
@@ -239,11 +244,6 @@ class ViewerStore:
         """Set the subarray (camera geometries and positions of the telescopes)"""
         with self._lock:
             self.subarray = subarray
-            # statistics created without the camera geometry have no camera maps: rebuild them
-            for key, statistics in list(self._statistics.items()):
-                cameras = [a for a in statistics if isinstance(a, CameraAccumulator)]
-                if any(a.n_pixels == 0 for a in cameras) and key[1] in subarray.tel:
-                    del self._statistics[key]
             self.version += 1
 
     def add_telescopes(self, subarray):
@@ -307,7 +307,8 @@ class ViewerStore:
                 self.push_row("dl2", row, tel_id=tel_id, **keys)
         row = container_row(event.dl2.stereo, stereo=True)
         if row:
-            self.push_row("dl2_stereo", row, **keys)
+            # the time of the event, for the stereo rate (the telescopes have it in their trigger)
+            self.push_row("dl2_stereo", {**row, "time": event.trigger.time}, **keys)
         for tel_id, container in event.trigger.tel.items():
             columns = to_columns(container, tel_id=tel_id, **keys)
             columns.update(to_columns({"event_type": event.trigger.event_type}))
@@ -329,12 +330,14 @@ class ViewerStore:
                 if kind in STATISTICS_KINDS:
                     tel_columns = self._telescope_frame(tel_id, tel_columns)
                     self._fill_statistics(kind, tel_id, tel_columns)
-                self._tables.setdefault(tel_id, _Tables()).add(kind, tel_columns)
+                tables = self._tables.setdefault(tel_id, _Tables())
+                tables.add(kind, tel_columns, valid_rows(kind, tel_columns))
                 if not self._events.get(tel_id):
                     # the events pushed one by one (a stream) stay the latest ones
                     self._latest[(tel_id, kind)] = (int(tel_columns["obs_id"][-1]),
                                                     int(tel_columns["event_id"][-1]))
-                self._count(tel_id, kind, n_rows(tel_columns), now, history=False)
+                    self._latest_valid[(tel_id, kind)] = tables.last_valid_key(kind)
+                self._count(tel_id, kind, n_rows(tel_columns), now)
             self.version += 1
 
     def _check(self, kind, columns):
@@ -359,11 +362,8 @@ class ViewerStore:
         for tel_id in unique:
             yield int(tel_id), _select(columns, tel_ids == tel_id)
 
-    def _count(self, tel_id, kind, n, now, history=True):
-        """
-        Count ``n`` rows received at ``now`` (monotonic time): for the current rates, and with
-        ``history`` in the rate history (per second of arrival)
-        """
+    def _count(self, tel_id, kind, n, now):
+        """Count ``n`` rows received at ``now`` (monotonic time), for the table of the data received"""
         self._counts[(tel_id, kind)] += n
         arrivals = self._arrivals.setdefault((tel_id, kind), deque())
         # rows within 0.1 s are counted together, the arrivals out of the window are dropped:
@@ -374,15 +374,45 @@ class ViewerStore:
             arrivals.append([now, n])
         while arrivals and arrivals[0][0] < now - RATE_WINDOW:
             arrivals.popleft()
-        if history:
-            arrival = time.time()
-            minute = int(arrival // RATE_BIN)
-            bins = self._history.setdefault((tel_id, kind), {})
-            self._history_start.setdefault((tel_id, kind), arrival)
-            bins[minute] = bins.get(minute, 0) + n
-            if len(bins) > 2 * RATE_HISTORY_BINS:  # forget the old minutes
-                for old in sorted(bins)[:-RATE_HISTORY_BINS]:
-                    del bins[old]
+
+    def _count_valid(self, tel_id, key, kind, event_time):
+        """
+        A valid level of an event pushed: it is counted once in the rate history, at the time of the
+        event. The time may come with another row of the event (e.g. its trigger): the levels
+        received before wait for it.
+        """
+        self._latest_valid[(tel_id, kind)] = key
+        events = self._rate_events.setdefault(tel_id, OrderedDict())
+        entry = events.get(key)
+        if entry is None:
+            entry = events[key] = [None, set(), set()]
+            while len(events) > RATE_EVENTS:
+                events.popitem(last=False)
+        if entry[0] is None and event_time is not None:
+            entry[0] = event_time
+            self._last_time[tel_id] = max(event_time, self._last_time.get(tel_id, event_time))
+            for waiting in entry[2]:
+                self._add_to_history(tel_id, waiting, event_time)
+            entry[1] |= entry[2]
+            entry[2] = set()
+        if kind in entry[1] or kind in entry[2]:
+            return
+        if entry[0] is None:
+            entry[2].add(kind)
+        else:
+            entry[1].add(kind)
+            self._add_to_history(tel_id, kind, entry[0])
+
+    def _add_to_history(self, tel_id, kind, event_time):
+        """Count a valid event in the rate history of a telescope and data level"""
+        bins = self._history.setdefault((tel_id, kind), {})
+        minute = int(event_time // RATE_BIN)
+        bins[minute] = bins.get(minute, 0) + 1
+        start = self._history_start.get((tel_id, kind))
+        self._history_start[(tel_id, kind)] = event_time if start is None else min(start, event_time)
+        if len(bins) > 2 * RATE_HISTORY_BINS:  # forget the old minutes
+            for old in sorted(bins)[:-RATE_HISTORY_BINS]:
+                del bins[old]
 
     def _keep_event(self, tel_id, key, kind, row):
         """Keep a row (or a `_LazyRow`) of a pushed event, in the last events of the telescope"""
@@ -399,13 +429,17 @@ class ViewerStore:
             row = {**_as_row(event[kind]), **_as_row(row)}
         event[kind] = row
         self._latest[(tel_id, kind)] = key
+        return row
 
     def _push_lazy(self, kind, container, keys):
         """Keep a container of an event, converted to a row only if the event is displayed"""
         now = time.monotonic()
         with self._lock:
             tel_id = keys["tel_id"]
-            self._keep_event(tel_id, (keys["obs_id"], keys["event_id"]), kind, _LazyRow(container, keys))
+            key = (keys["obs_id"], keys["event_id"])
+            self._keep_event(tel_id, key, kind, _LazyRow(container, keys))
+            if container_is_valid(kind, container):
+                self._count_valid(tel_id, key, kind, _unix_time(getattr(container, "event_time", None)))
             self._count(tel_id, kind, 1, now)
             self.version += 1
 
@@ -419,10 +453,12 @@ class ViewerStore:
             tel_ids = np.asarray(columns["tel_id"]).astype(int)
             obs_ids = np.asarray(columns["obs_id"]).astype(int)
             event_ids = np.asarray(columns["event_id"]).astype(int)
-            # only the last max_events rows of each telescope can be kept
-            for i in range(max(0, len(tel_ids) - self.max_events * len(set(tel_ids.tolist()))), len(tel_ids)):
-                key = (int(obs_ids[i]), int(event_ids[i]))
-                self._keep_event(int(tel_ids[i]), key, kind, _row(columns, i))
+            for i in range(len(tel_ids)):
+                tel_id, key = int(tel_ids[i]), (int(obs_ids[i]), int(event_ids[i]))
+                row = self._keep_event(tel_id, key, kind, _row(columns, i))
+                if isinstance(row, dict) and row_is_valid(kind, row):
+                    event_time = next((_unix_time(row[name]) for name in TIME_COLUMNS if name in row), None)
+                    self._count_valid(tel_id, key, kind, event_time)
             for tel_id, tel_columns in self._split_telescopes(columns):
                 self._count(tel_id, kind, n_rows(tel_columns), now)
                 if kind in STATISTICS_KINDS:
@@ -435,7 +471,7 @@ class ViewerStore:
     def _needed(self, kind):
         """Columns used by the statistics of a data level"""
         if kind not in self._needed_columns:
-            statistics = build_statistics(self.statistics_configs[kind], n_pixels=0)
+            statistics = build_statistics(self.statistics_configs[kind])
             names = {name for accumulator in statistics for name in accumulator.columns}
             self._needed_columns[kind] = names | {"tel_id", "obs_id", "event_id"}
         return self._needed_columns[kind]
@@ -504,12 +540,7 @@ class ViewerStore:
         key = (kind, tel_id, combination)
         statistics = self._statistics.get(key)
         if statistics is None:
-            n_pixels = 0
-            if self.subarray is not None and tel_id in self.subarray.tel:
-                n_pixels = self.subarray.tel[tel_id].camera.geometry.n_pixels
-            elif columns is not None and "image" in columns:
-                n_pixels = np.shape(columns["image"])[1]
-            statistics = build_statistics(self.statistics_configs[kind], n_pixels)
+            statistics = build_statistics(self.statistics_configs[kind])
             self._statistics[key] = statistics
         return statistics
 
@@ -547,22 +578,13 @@ class ViewerStore:
             tables = self._tables.get(tel_id)
             return tables.keys[-1] if tables and tables.keys else None
 
-    def find_latest_key(self, tel_id, kind, column):
-        """(obs_id, event_id) of the last event of a telescope whose ``kind`` row has a finite ``column``"""
-        columns = (column, CAMERA_FRAME_PREFIX + column)
+    def latest_valid_key(self, tel_id, kind):
+        """
+        (obs_id, event_id) of the last event of a telescope whose data level ``kind`` is valid
+        (`sst1mpipe_viewer.validity`), None if none
+        """
         with self._lock:
-            for key, event in reversed(self._events.get(tel_id, {}).items()):
-                row = _as_row(event[kind]) if kind in event else None
-                if row is not None and any(np.isfinite(float(row.get(c, np.nan))) for c in columns):
-                    return key
-            tables = self._tables.get(tel_id)
-            if tables is None:
-                return None
-            for c in columns:
-                key = tables.last_key_with(kind, c)
-                if key is not None:
-                    return key
-            return None
+            return self._latest_valid.get((tel_id, kind))
 
     def event_keys(self, tel_id):
         """(obs_id, event_id) of the events of a telescope: those of the tables, then the last ones pushed"""
@@ -654,9 +676,9 @@ class ViewerStore:
         """
         Rate of the rows of a telescope and data level in time, per minute.
 
-        The rows pushed event by event are counted by time of arrival (the last 24 hours, up to
-        now); the rows of tables by time of their events (a table with the event times, e.g. the
-        trigger table, is needed).
+        Only the events whose level is valid are counted (`sst1mpipe_viewer.validity`), at the
+        time of the event (its trigger ``time`` or ``event_time``; the events without time are not
+        counted). For the events pushed one by one: the last 24 hours, up to the last event pushed.
 
         Returns
         -------
@@ -667,7 +689,7 @@ class ViewerStore:
         with self._lock:
             bins = self._history.get((tel_id, kind))
             if bins:
-                return live_rates(bins, self._history_start[(tel_id, kind)], time.time(),
+                return live_rates(bins, self._history_start[(tel_id, kind)], self._last_time[tel_id],
                                   max_bins=RATE_HISTORY_BINS)
             tables = self._tables.get(tel_id)
             if tables is None:
@@ -694,15 +716,7 @@ class ViewerStore:
                     value = next((row[name] for name in TIME_COLUMNS if name in row), None)
                     if value is not None:
                         break
-        if value is None:
-            return None
-        if isinstance(value, np.ndarray) and value.dtype == object:
-            value = value[()]
-        try:
-            value = float(value.unix) if isinstance(value, Time) else float(value)
-        except (TypeError, ValueError):
-            return None
-        return value if np.isfinite(value) else None
+        return _unix_time(value)
 
     def algorithms(self, tel_id, kind="dl2"):
         """
@@ -755,3 +769,20 @@ class ViewerStore:
             self.version += 1
         self.dl3.reset()
 
+
+
+def _unix_time(value):
+    """Unix time (s) of a time value (a number, an astropy ``Time``, or one of them in a 0-d array), None if unknown"""
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray) and value.dtype == object:
+        value = value[()]
+    try:
+        if isinstance(value, Time):
+            # for a UTC time, cheaper than Time.unix (the rates are filled for every event)
+            value = (value.jd1 - 2440587.5 + value.jd2) * 86400.0 if value.scale == "utc" else value.unix
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    # the unset times of ctapipe (NAN_TIME, MJD 0) are before the unix origin
+    return value if np.isfinite(value) and value > 0 else None

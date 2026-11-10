@@ -75,10 +75,11 @@ def test_file_mode(subarray):
     statistics = store.statistics(21)
     assert statistics["n_rows"] == 1000
     assert statistics["accumulators"]["hillas_length"]["n_entries"] == 1000
-    assert statistics["accumulators"]["image_mask_fraction"]["n_entries"] == 1000
     # rates in time of the events (trigger times of the file)
     times, rates, errors = store.rate_history(21, "dl1")
-    assert len(times) >= 1 and rates.max() > 100 and np.all(errors < rates)
+    # only the events with a valid DL1 (Hillas parameters) are counted
+    assert len(times) >= 1 and 5 < rates.max() < 100 and np.all(errors < rates)
+    assert store.latest_valid_key(21, "dl1") != store.latest_key(21, "dl1")
     keys = store.event_keys(21)
     assert len(keys) == 1000
 

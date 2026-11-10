@@ -16,7 +16,7 @@ from bokeh.plotting import figure
 from ..components import FieldsTable, RatePanel
 from ..components.histogram import add_caption, format_number
 from ..dl2 import SUBARRAY_ID, find_algorithms, generic_columns
-from .base import Page, event_description, message_div, telescope_header
+from .base import Page, event_description, message_div, set_stale, stale_message, telescope_header
 from .statistics import StatisticsPage
 
 __all__ = ["DL2StereoPage"]
@@ -60,10 +60,13 @@ class DL2StereoPage(Page):
         self.fields = FieldsTable(width=620, height=430, labels={SUBARRAY_ID: "Subarray"})
         # the statistics of all the stereo events, with the menus of the algorithms
         self.statistics = StatisticsPage(session, KIND)
+        # blurred when the displays are not those of the current event
+        self.displays = row(self.ground, self.fields.layout)
+        self._shown = False
         self.layout = column(
             self.rates.layout,
             row(self.header, self.message),
-            row(self.ground, self.fields.layout),
+            self.displays,
             Div(text="<h3 style='margin: 10px 0 0 0'>Statistics of the stereo events</h3>"),
             self.statistics.layout,
         )
@@ -108,14 +111,22 @@ class DL2StereoPage(Page):
         self.rates.set_markers({SUBARRAY_ID: store.event_time(SUBARRAY_ID, key)})
         rows = store.event(SUBARRAY_ID, key, (KIND, "trigger")) if key is not None else {}
         data = rows.get(KIND)
+        message = stale_message(session, SUBARRAY_ID, KIND, key, data is not None)
         if data is None:
-            self._show_message("No stereo DL2 data" + ("" if session.follow else " in this event") + ".")
+            if self._shown:
+                # the last stereo event shown is kept, blurred: it is not the current event
+                self._show_message(message + " The displays are those of another event.")
+                set_stale(self.displays, True)
+                return
+            self._show_message(message)
             self._telescopes([])
             self.core_source.data = dict(x=[], y=[])
             self.caption.text = self.summary.text = ""
             self.fields.set_rows({})
             return
-        self._show_message("")
+        self._shown = True
+        self._show_message(message or "")
+        set_stale(self.displays, message is not None)
         # the fields of the algorithms chosen in the menus, with their generic names
         algorithms = find_algorithms(data, stereo=True)
         chosen = self.statistics.algorithms()

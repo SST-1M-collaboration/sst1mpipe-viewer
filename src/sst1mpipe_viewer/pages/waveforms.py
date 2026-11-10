@@ -6,7 +6,7 @@ from bokeh.models import Div, Select, Slider
 
 from ..components import FieldsTable, WaveformPanel
 from ..components.waveform import waveform_2d
-from .base import LevelRates, Page, event_description, message_div, telescope_header
+from .base import LevelRates, Page, event_description, message_div, set_stale, stale_message, telescope_header
 from .trigger import TRACE_FIELDS, TriggerView, trace_fields
 
 __all__ = ["WaveformPage", "field_shapes", "sample_image"]
@@ -83,11 +83,12 @@ class _TelescopeWaveforms:
                                                  on_pixel_click=session.pixel_click(tel_id), width=400,
                                                  height=370)
         self.trigger = TriggerView(session, tel_id) if page.kind == "r0" else None
-        rows = [row(self.header, self.sample, self.message),
-                row(self.camera.layout, self.waveforms.layout, self.field_camera.layout)]
+        rows = [row(self.camera.layout, self.waveforms.layout, self.field_camera.layout)]
         if self.trigger is not None:
             rows.append(row(self.trigger.layout, self.trigger.traces.layout))
-        self.layout = column(*rows)
+        # the displays are blurred when they are not those of the current event (`show_status`)
+        self.displays = column(*rows)
+        self.layout = column(row(self.header, self.sample, self.message), self.displays)
         self.shown = False  # an event is displayed
 
     def set_sample_range(self, n_samples):
@@ -98,15 +99,19 @@ class _TelescopeWaveforms:
             if self.sample.value > end:
                 self.sample.value = end
 
-    def _show_message(self, text):
-        """Show a message above the displays (only sent to the browser if it changed)"""
-        if self.message.text != text:
-            self.message.text = text
+    def show_status(self, message, stale=False):
+        """
+        Show a message above the displays (None for none) and blur the displays if they are
+        ``stale``: those of another event than the current one
+        """
+        if self.message.text != (message or ""):
+            self.message.text = message or ""
+        set_stale(self.displays, stale)
 
     def clear(self, message):
         """Show no event, with a message (e.g. why there is no data)"""
         self.shown = False
-        self._show_message(message)
+        self.show_status(message)
         self.camera.clear()
         self.field_camera.clear()
         self.waveforms.clear()
@@ -117,7 +122,6 @@ class _TelescopeWaveforms:
         """Show the event ``key`` (its rows ``{kind: row}``, ``data`` the row of the page)"""
         page, session = self.page, self.session
         self.shown = True
-        self._show_message("")
         self.camera.set_caption(event_description(key, rows))
         self.camera.set_geometry(geometry)
         self.field_camera.set_geometry(geometry)
@@ -238,13 +242,17 @@ class WaveformPage(Page):
         table = {}
         for tel_id, (key, rows, data, geometry, shapes) in events.items():
             view = self.views[tel_id]
-            if tel_id in shown:
+            has_data = tel_id in shown
+            message = stale_message(session, tel_id, self.kind, key, has_data)
+            if has_data:
                 view.update(key, rows, data, geometry)
                 table[tel_id] = {self.kind: data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
-            elif session.follow and view.shown:
-                # following a stream: the last event displayed is kept (not cleared and redrawn)
-                continue
+                view.show_status(message, stale=message is not None)
+            elif geometry is None:
+                view.clear("No camera geometry (no subarray).")
+            elif view.shown:
+                # the displays of the last event shown are kept, blurred: they are not those of the current event
+                view.show_status(message + " The displays are those of another event.", stale=True)
             else:
-                view.clear("No camera geometry (no subarray)." if geometry is None
-                           else f"No {self.title} data" + ("" if session.follow else " in this event") + ".")
+                view.clear(message)
         self.fields.set_rows(table)

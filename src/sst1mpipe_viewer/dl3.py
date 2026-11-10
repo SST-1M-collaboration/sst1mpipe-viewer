@@ -100,7 +100,7 @@ class DL3Data:
         self.config = config if config is not None else load_statistics_config(kind="dl3")
         self._on_change = on_change
         self._lock = threading.Lock()
-        self._statistics = build_statistics(self.config, n_pixels=0)
+        self._statistics = build_statistics(self.config)
         self._observations = {}  # obs_id -> summary (dict)
         self._times = []  # unix times of the events, one array per push
         self._rates = None  # cached (times, rates, errors)

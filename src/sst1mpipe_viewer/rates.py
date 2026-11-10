@@ -59,17 +59,17 @@ def binned_rates(times, bin_width=RATE_BIN, max_bins=2000):
 
 def live_rates(counts, first, now, bin_width=RATE_BIN, max_bins=1440):
     """
-    Rates of rows counted as they arrive (a stream), up to now: the minutes without any row have
-    a rate of 0, the current minute is included (with the time elapsed so far).
+    Rates of events counted one by one (a stream), up to the last event: the minutes without any
+    event have a rate of 0, the last minute is included (with the time covered so far).
 
     Parameters
     ----------
     counts : dict
-        ``{bin index: number of rows}``, the index of a bin being ``int(time // bin_width)``.
+        ``{bin index: number of events}``, the index of a bin being ``int(event time // bin_width)``.
     first : float
-        Time of arrival of the first row (unix s).
+        Time of the first event counted (unix s).
     now : float
-        Current time (unix s).
+        Time of the last event received (unix s).
     bin_width : float
         Duration of the bins (s).
     max_bins : int

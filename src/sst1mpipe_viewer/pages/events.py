@@ -12,17 +12,14 @@ from bokeh.models import CheckboxGroup, Div, Select
 
 from ..components import FieldsTable
 from ..frames import source_telescope_frame
-from .base import LevelRates, Page, event_description, message_div, telescope_header
+from ..validity import row_is_valid
+from .base import LevelRates, Page, event_description, message_div, set_stale, stale_message, telescope_header
 from .waveforms import field_shapes, set_options
 
 __all__ = ["ImageEventPage"]
 
 #: indices of the display options (check boxes)
-SHOW_MASK, SHOW_ELLIPSE, ONLY_RECONSTRUCTED = 0, 1, 2
-
-#: DL1 column which is finite for the events with parameters: in Live mode, the DL1 page can show
-#: only these events (not the events without any pixel after the cleaning)
-RECONSTRUCTED_COLUMN = "hillas_intensity"
+SHOW_MASK, SHOW_ELLIPSE = 0, 1
 
 
 class _TelescopeImage:
@@ -30,16 +27,20 @@ class _TelescopeImage:
 
     def __init__(self, session, tel_id):
         self.header = telescope_header(session, tel_id)
-        self.message = message_div(width=330)  # the cameras of the telescopes are side by side
+        self.message = message_div(width=330, height=48)  # the cameras of the telescopes are side by side
         self.camera = session.camera_panel(geometry=session.geometry(tel_id), title="Image",
                                            on_pixel_click=session.pixel_click(tel_id), width=460, height=430)
         self.layout = column(row(self.header, self.message), self.camera.layout)
         self.shown = False  # an event is displayed
 
-    def show_message(self, text):
-        """Show a message above the camera (only sent to the browser if it changed)"""
-        if self.message.text != text:
-            self.message.text = text
+    def show_status(self, message, stale=False):
+        """
+        Show a message above the camera (None for none) and blur the camera if it is ``stale``:
+        its image is that of another event than the current one
+        """
+        if self.message.text != (message or ""):
+            self.message.text = message or ""
+        set_stale(self.camera.layout, stale)
 
 
 class ImageEventPage(Page):
@@ -61,10 +62,8 @@ class ImageEventPage(Page):
         super().__init__(session)
         self.kind = kind
         self.title = f"{kind.upper()} Event"
-        labels = ["Cleaning mask", "Hillas ellipse"]
-        if kind == "dl1":
-            labels.append("Live: only the events surviving the cleaning")
-        self.options = CheckboxGroup(labels=labels, active=list(range(len(labels))), inline=True)
+        self.options = CheckboxGroup(labels=["Cleaning mask", "Hillas ellipse"], active=[SHOW_MASK, SHOW_ELLIPSE],
+                                     inline=True)
         self.options.on_change("active", lambda attr, old, new: self.refresh())
         self.pixel_field = Select(title="Camera", value="image", options=["image", "peak_time", "image_mask"],
                                   width=200)
@@ -95,11 +94,10 @@ class ImageEventPage(Page):
     def _events(self, tel_ids):
         """``{tel_id: (key, rows, geometry)}``: the displayed event of each telescope"""
         session = self.session
-        only_reconstructed = ONLY_RECONSTRUCTED in self.options.active
-        finite_column = RECONSTRUCTED_COLUMN if only_reconstructed else None
         events = {}
         for tel_id in tel_ids:
-            key = session.event_key(tel_id, self.kind, finite_column=finite_column)
+            # in Live mode: the last event whose level is valid (e.g. a DL1 with Hillas parameters)
+            key = session.event_key(tel_id, self.kind)
             rows = self.store.event(tel_id, key, ("dl1", "dl2", "trigger")) if key is not None else {}
             events[tel_id] = (key, rows, session.geometry(tel_id))
         return events
@@ -141,23 +139,30 @@ class ImageEventPage(Page):
         """Show the event of a telescope in its camera"""
         session = self.session
         camera = view.camera
-        camera.set_caption(event_description(key, rows))
-        if geometry is None or data is None:
-            if session.follow and view.shown:
-                return  # following a stream: the last event displayed is kept
+        level = self.kind.upper()
+        message = stale_message(session, tel_id, self.kind, key, data is not None)
+        if geometry is None:
             view.shown = False
-            only = ONLY_RECONSTRUCTED in self.options.active and session.follow
-            view.show_message(
-                "No camera geometry (no subarray)." if geometry is None
-                else f"No {self.kind.upper()} data" + (" reconstructed" if only else "")
-                + ("" if session.follow else " in this event") + "."
-            )
+            view.show_status("No camera geometry (no subarray).")
             camera.clear()
+            return
+        if data is None:
+            if view.shown:
+                # the image of the last event shown is kept, blurred: it is not that of the current event
+                view.show_status(message + " The image is that of another event.", stale=True)
+            else:
+                view.show_status(message)
+                camera.clear()
             return
         view.shown = True
         image = rows.get("dl1", {})
         name = self.pixel_field.value
-        view.show_message("" if name in image else "No DL1 image of this event (its fields are in the table).")
+        if message is None and not row_is_valid(self.kind, data):
+            message = f"The {level} of this event is not valid (it is not counted in the rate)."
+        elif message is None and name not in image:
+            message = "No DL1 image of this event (its fields are in the table)."
+        view.show_status(message, stale=key != session.current_key(tel_id))
+        camera.set_caption(event_description(key, rows))
         camera.set_geometry(geometry)
         camera.set_title(name)
         if name in image and np.shape(image[name]) == (geometry.n_pixels,):

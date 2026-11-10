@@ -6,8 +6,7 @@ A configuration lists the histograms of the statistics page of the level:
 
 - ``hist1d``: histograms of one column (``log_x: true`` for logarithmic bins and axis, the range
   being that of the values; ``log_y: true`` for a logarithmic axis of the entries);
-- ``hist2d``: histograms of two columns (correlations; ``x_log`` / ``y_log`` for logarithmic bins);
-- ``camera``: per pixel maps of an image column (DL1).
+- ``hist2d``: histograms of two columns (correlations; ``x_log`` / ``y_log`` for logarithmic bins).
 """
 
 from importlib.resources import files
@@ -15,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from .accumulators import CameraAccumulator, Histogram1D, Histogram2D, StatisticsSet, make_bins
+from .accumulators import Histogram1D, Histogram2D, StatisticsSet, make_bins
 
 __all__ = ["STATISTICS_KINDS", "DEFAULT_STATISTICS_CONFIGS", "load_statistics_config", "build_statistics",
            "display_options"]
@@ -29,7 +28,7 @@ DEFAULT_STATISTICS_CONFIGS = {
     for kind in (*STATISTICS_KINDS, "dl3")  # the DL3 statistics are not per telescope (sst1mpipe_viewer.dl3)
 }
 
-SECTIONS = ("hist1d", "hist2d", "camera")
+SECTIONS = ("hist1d", "hist2d")
 
 
 def load_statistics_config(path=None, kind="dl1"):
@@ -46,7 +45,7 @@ def load_statistics_config(path=None, kind="dl1"):
     Returns
     -------
     dict
-        The configuration, ``{"hist1d": [...], "hist2d": [...], "camera": [...]}``.
+        The configuration, ``{"hist1d": [...], "hist2d": [...]}``.
     """
     path = DEFAULT_STATISTICS_CONFIGS[kind] if path is None else Path(path)
     with path.open() as f:
@@ -58,7 +57,7 @@ def load_statistics_config(path=None, kind="dl1"):
     return config
 
 
-def build_statistics(config, n_pixels):
+def build_statistics(config):
     """
     Create the accumulators of a configuration (empty).
 
@@ -66,8 +65,6 @@ def build_statistics(config, n_pixels):
     ----------
     config : dict
         A statistics configuration (`load_statistics_config`).
-    n_pixels : int
-        Number of pixels of the camera, for the camera maps.
 
     Returns
     -------
@@ -90,12 +87,6 @@ def build_statistics(config, n_pixels):
                            log=spec.pop("y_log", False))
         name = spec.pop("name", f"{y}_vs_{x}")
         statistics.add(Histogram2D(name=name, x=x, y=y, x_bins=x_bins, y_bins=y_bins, **spec))
-    for spec in config.get("camera", ()):
-        spec = dict(spec)
-        column = spec.pop("column")
-        mode = spec.pop("mode", "mean")
-        name = spec.pop("name", f"{column}_{mode}")
-        statistics.add(CameraAccumulator(name=name, column=column, n_pixels=n_pixels, mode=mode, **spec))
     return statistics
 
 

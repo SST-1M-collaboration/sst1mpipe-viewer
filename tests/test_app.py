@@ -316,3 +316,30 @@ def test_displayed_event_marker(subarray):
     session.step(+1, [1])
     page.refresh()
     assert page.rates.panel.markers[1].data["x"] == [130e3] and page.rates.panel.markers[2].data["x"] == []
+
+
+def test_stale_displays_are_blurred(subarray):
+    """Displays which are not those of the current event are kept, blurred, with a message"""
+    store = ViewerStore(subarray)
+    store.push_row("r1", r1_row(1))
+    store.push_row("dl1", dl1_row(1))
+    session = Browser(store)
+    refresh_all(session)
+    r1, dl1 = session.pages[2].views[1], session.pages[4].views[1]
+    assert not r1.displays.styles and not dl1.camera.layout.styles and r1.message.text == ""
+    # Live: the last event has no R1 and its DL1 is not valid: the event 1 stays displayed, blurred
+    store.push_row("dl1", dl1_row(2, intensity=np.nan))
+    refresh_all(session)
+    assert "blur" in r1.displays.styles["filter"] and "blur" in dl1.camera.layout.styles["filter"]
+    assert r1.message.text == "Event 2 has no valid R1 data: event 1 is shown."
+    assert dl1.message.text == "Event 2 has no valid DL1 data: event 1 is shown."
+    # a new valid event: sharp again
+    store.push_row("r1", r1_row(3))
+    store.push_row("dl1", dl1_row(3))
+    refresh_all(session)
+    assert not r1.displays.styles and not dl1.camera.layout.styles and dl1.message.text == ""
+    # browsing an event without R1: the last displays are kept, blurred; its DL1 is shown but flagged
+    session.go_to("2")
+    refresh_all(session)
+    assert "blur" in r1.displays.styles["filter"] and r1.message.text.startswith("No R1 data in event 2.")
+    assert not dl1.camera.layout.styles and "not valid" in dl1.message.text

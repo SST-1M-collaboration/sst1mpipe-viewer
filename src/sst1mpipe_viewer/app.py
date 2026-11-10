@@ -304,17 +304,18 @@ class ViewerSession:
         return self._geometries[key]
 
     # ---------------------------------------------------------------- event
-    def event_key(self, tel_id, kind=None, finite_column=None):
+    def event_key(self, tel_id, kind=None):
         """
-        Key of the displayed event of a telescope: if following, the last one with data of
-        ``kind`` (with a finite ``finite_column`` if given, e.g. the events surviving the cleaning),
-        else the chosen one.
+        Key of the displayed event of a telescope: the chosen one, or in Live mode the last event
+        whose level ``kind`` is valid (`sst1mpipe_viewer.validity`; the last event if ``kind`` is None).
         """
         if not self.follow:
             return self.state.event_keys.get(tel_id)
-        if finite_column is not None:
-            return self.store.find_latest_key(tel_id, kind, finite_column)
-        return self.store.latest_key(tel_id, kind)
+        return self.store.latest_key(tel_id) if kind is None else self.store.latest_valid_key(tel_id, kind)
+
+    def current_key(self, tel_id):
+        """Key of the current event of a telescope: the chosen one, or in Live mode the last event received"""
+        return self.state.event_keys.get(tel_id) if not self.follow else self.store.latest_key(tel_id)
 
     def go_to(self, value):
         """

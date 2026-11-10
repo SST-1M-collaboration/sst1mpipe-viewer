@@ -31,8 +31,6 @@ def test_statistics_and_reset(subarray):
     # every row is accumulated (no cuts in the viewer)
     assert snapshot["accumulators"]["hillas_intensity"]["n_entries"] == 10
     assert snapshot["accumulators"]["hillas_length"]["n_entries"] == 10
-    assert np.allclose(snapshot["accumulators"]["image_mask_fraction"]["values"][:5], 1)
-    assert len(snapshot["accumulators"]["image_mask_fraction"]["values"]) == N_PIXELS
 
     version = store.version
     store.reset_statistics(1, "hillas_length")
@@ -122,37 +120,53 @@ def test_dl2_containers(subarray):
     assert store.statistics(SUBARRAY_ID, "dl2_stereo")["accumulators"]["core"]["n_entries"] == 1
 
 
-def test_rate_history(subarray, monkeypatch):
-    """Rows per second, per minute with Poisson errors: by time of arrival (stream) or of the events (tables)"""
-    import sst1mpipe_viewer.store as store_module
-
-    now = [1000.0]
-    monkeypatch.setattr(store_module.time, "time", lambda: now[0])
+def test_rate_history(subarray):
+    """Rate of the valid events per minute, from their timestamps, with Poisson errors"""
     store = ViewerStore(subarray)
-    for i in range(3):
-        store.push_row("dl1", dl1_row(i))
-    now[0] = 1150.0
-    store.push_row("dl1", dl1_row(10))
-    now[0] = 1160.0
+    # the time of an event comes with its trigger row, before or after its other levels
+    for event_id, event_time, intensity in ((0, 1000.0, 100.0), (1, 1005.0, np.nan), (2, 1010.0, 100.0)):
+        store.push_row("dl1", dl1_row(event_id, intensity=intensity))
+        store.push_row("trigger", dict(obs_id=1, event_id=event_id, tel_id=1, time=event_time))
+    store.push_row("trigger", dict(obs_id=1, event_id=3, tel_id=1, time=1150.0))
+    store.push_row("dl1", dl1_row(3))
+    store.push_row("dl1", dl1_row(3))  # an event is counted once
+    store.push_row("dl1", dl1_row(4))  # no timestamp: not in the rates
     times, rates, errors = store.rate_history(1, "dl1")
-    # minutes 960-1020 (covered from the first row at 1000), 1020-1080, 1080-1140 (no row), 1140-1200 (until now)
-    assert times.tolist() == [1010.0, 1050.0, 1110.0, 1150.0]
-    assert np.allclose(rates, [3 / 20, 0, 0, 1 / 20]) and np.allclose(errors, [np.sqrt(3) / 20, 0, 0, 1 / 20])
+    # minutes 960-1020 (from the first valid event at 1000), 1020-1080, 1080-1140 (no event),
+    # 1140-1200 (until the last event at 1150); the event 1 is not valid (no Hillas parameters)
+    assert times.tolist() == [1010.0, 1050.0, 1110.0, 1145.0]
+    assert np.allclose(rates, [2 / 20, 0, 0, 1 / 10]) and np.allclose(errors, [np.sqrt(2) / 20, 0, 0, 1 / 10])
+    assert np.allclose(store.rate_history(1, "trigger")[1], [3 / 20, 0, 0, 1 / 10])
+    assert store.latest_valid_key(1, "dl1") == (1, 4) and store.event_time(1, (1, 3)) == 1150.0
 
-    # tables: the times of the events, from the table with a time column (here the trigger table)
+    # tables: the times of the valid events, from the table with a time column (here the trigger table)
     tables = ViewerStore(subarray)
-    tables.push_table("dl1", Table(rows=[dl1_row(i) for i in range(4)]))
+    tables.push_table("dl1", Table(rows=[dl1_row(i, intensity=np.nan if i == 3 else 100.0) for i in range(5)]))
     assert len(tables.rate_history(1, "dl1")[0]) == 0  # no time yet
-    tables.push_table("trigger", Table(dict(obs_id=[1] * 4, event_id=list(range(4)), tel_id=[1] * 4,
-                                            time=[100.0, 110.0, 130.0, 150.0])))
+    tables.push_table("trigger", Table(dict(obs_id=[1] * 5, event_id=list(range(5)), tel_id=[1] * 5,
+                                            time=[100.0, 110.0, 130.0, 140.0, 150.0])))
     times, rates, errors = tables.rate_history(1, "dl1")
     # minutes 60-120 (from the first event at 100) and 120-180 (until the last event at 150)
     assert times.tolist() == [110.0, 135.0]
     assert np.allclose(rates, [2 / 20, 2 / 30]) and np.allclose(errors, [np.sqrt(2) / 20, np.sqrt(2) / 30])
-    # time of an event, for the marker of the displayed event
     assert tables.event_time(1, (1, 2)) == 130.0 and tables.event_time(1, (1, 99)) is None
-    store.push_row("trigger", dict(obs_id=1, event_id=10, tel_id=1, time=1234.5))
-    assert store.event_time(1, (1, 10)) == 1234.5
+    assert tables.latest_valid_key(1, "dl1") == (1, 4)
+
+
+def test_validity():
+    """A level of an event is valid if it has waveforms / Hillas parameters / a valid DL2 algorithm"""
+    from sst1mpipe_viewer.validity import row_is_valid, valid_rows
+
+    assert row_is_valid("r1", {"waveform": np.zeros((2, 3))}) and not row_is_valid("r1", {"pixel_status": 1})
+    assert row_is_valid("dl1", {"hillas_intensity": 5.0}) and not row_is_valid("dl1", {"hillas_intensity": np.nan})
+    assert row_is_valid("dl1", {"camera_frame_hillas_intensity": 5.0}) and not row_is_valid("dl1", {"image": 1})
+    assert row_is_valid("dl2", {"A_tel_is_valid": False, "B_tel_is_valid": True})
+    assert not row_is_valid("dl2", {"A_tel_is_valid": False}) and row_is_valid("dl2", {"A_tel_energy": 1.0})
+    assert row_is_valid("trigger", {})
+    assert valid_rows("dl1", {"hillas_intensity": np.array([1.0, np.nan])}).tolist() == [True, False]
+    columns = {"A_is_valid": np.array([True, False, False]), "B_is_valid": np.array([False, False, True])}
+    assert valid_rows("dl2_stereo", columns).tolist() == [True, False, True]
+    assert valid_rows("r0", {"waveform": np.zeros((2, 1, 3))}).tolist() == [True, True]
 
 
 def test_invalid_input(subarray):
@@ -168,7 +182,7 @@ def test_max_events_and_navigation(subarray):
     for i in range(5):
         store.push_row("dl1", dl1_row(i, intensity=np.nan if i == 4 else 100.0))
     assert store.event_keys(1) == [(1, 2), (1, 3), (1, 4)]
-    assert store.find_latest_key(1, "dl1", "hillas_intensity") == (1, 3)
+    assert store.latest_valid_key(1, "dl1") == (1, 3)  # the last event has no Hillas parameters
 
 
 def test_push_from_threads(subarray):
@@ -193,15 +207,6 @@ def test_updated_event_becomes_the_latest(subarray):
     store.push_row("r1", r1_row(1))  # event 1 updated after event 2
     assert store.latest_key(1) == (1, 1)
     assert store.event_keys(1) == [(1, 2), (1, 1)]
-
-
-def test_camera_maps_after_late_subarray(subarray):
-    store = ViewerStore()
-    parameters = {k: v for k, v in dl1_row(1).items() if k not in ("image", "peak_time", "image_mask")}
-    store.push_row("dl1", parameters)
-    store.set_subarray(subarray)
-    store.push_row("dl1", dl1_row(2))
-    assert store.statistics(1)["accumulators"]["image_mask_fraction"]["n_entries"] == 1
 
 
 def test_tables_keep_all_their_events(subarray):
