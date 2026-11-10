@@ -141,8 +141,6 @@ class ImageEventPage(Page):
             camera.clear()
             return
         if data is None or not row_is_valid(self.kind, data):
-            if session.follow and view.shown:
-                return  # Live: the last valid event displayed is kept until the next valid one
             # a level which is not valid is not displayed
             view.shown = False
             view.show_message(missing_message(session, tel_id, self.kind))

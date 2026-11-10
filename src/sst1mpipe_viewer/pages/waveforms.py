@@ -242,9 +242,6 @@ class WaveformPage(Page):
                 table[tel_id] = {self.kind: data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
             elif geometry is None:
                 view.clear("No camera geometry (no subarray).")
-            elif session.follow and view.shown:
-                # Live: the last valid event displayed is kept until the next valid one
-                continue
             else:
                 # a level which is not valid is not displayed
                 view.clear(missing_message(session, tel_id, self.kind))

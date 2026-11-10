@@ -72,8 +72,12 @@ def parse_args(argv=None):
                         help="replay the files endlessly (the timestamps are shifted at each pass)")
     parser.add_argument("--refresh-period", type=int, default=250,
                         help="period of the check for changes in ms (default: %(default)s)")
+    parser.add_argument("--live-period", type=float, default=1.0,
+                        help="Live mode: one event (the last received) is shown every this period in s, the same in"
+                        " all the pages (default: %(default)s; also chosen in the pages)")
     parser.add_argument("--event-period", type=float, default=0.5,
-                        help="minimum time between two displayed events of a stream in s (default: %(default)s)")
+                        help="minimum time between two refreshes of a page for new data (rates) in s"
+                        " (default: %(default)s)")
     parser.add_argument("--statistics-period", type=float, default=2.0,
                         help="minimum time between two refreshes of the statistics in s (default: %(default)s)")
     parser.add_argument("--colormap", default="inferno",
@@ -119,8 +123,8 @@ def main(argv=None):
     log.info("SST-1M viewer at http://%s:%d/", args.address or "localhost", args.port)
     serve(store, port=args.port, address=args.address, allow_websocket_origin=args.allow_websocket_origin,
           show=args.show, refresh_period=args.refresh_period, statistics_period=args.statistics_period,
-          event_period=args.event_period, colormap=args.colormap, field_colormap=args.field_colormap,
-          color_scale=args.color_scale)
+          event_period=args.event_period, live_period=args.live_period, colormap=args.colormap,
+          field_colormap=args.field_colormap, color_scale=args.color_scale)
 
 
 def make_streams(args, store):

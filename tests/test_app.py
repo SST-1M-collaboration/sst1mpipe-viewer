@@ -326,7 +326,7 @@ def test_displayed_event_marker(subarray):
 
 
 def test_only_valid_levels_are_displayed(subarray):
-    """Live: the last valid event of a level stays displayed; browsing: an event without a valid level is not shown"""
+    """A level of the displayed event which is not valid (or missing) is not displayed, in Live mode and browsing"""
     store = ViewerStore(subarray)
     store.push_row("r1", r1_row(1))
     store.push_row("dl1", dl1_row(1))
@@ -334,22 +334,46 @@ def test_only_valid_levels_are_displayed(subarray):
     refresh_all(session)
     r1, dl1 = session.pages[2].views[1], session.pages[4].views[1]
     assert r1.shown and dl1.shown and r1.message.text == "" and dl1.message.text == ""
-    # Live: the last event has no R1 and its DL1 is not valid: the event 1 stays displayed, without message
+    # Live: the last event (sampled) has no R1 and its DL1 is not valid: they are not displayed
     store.push_row("dl1", dl1_row(2, intensity=np.nan))
-    refresh_all(session)
-    assert r1.shown and dl1.shown and r1.message.text == "" and dl1.message.text == ""
-    assert "event_id 1 " in dl1.camera.caption.text + " "
-    # browsing the event 2: its R1 is missing and its DL1 is not valid: nothing is displayed
-    session.go_to("2")
+    session.state.sample_live(store, force=True)
     refresh_all(session)
     assert not r1.shown and r1.message.text == "No valid R1 data in event 2."
     assert not dl1.shown and dl1.message.text == "No valid DL1 data in event 2."
     assert np.all(np.isnan(dl1.camera.display.datasource.data["values"]))
+    # browsing the event 1: displayed
     session.go_to("1")
     refresh_all(session)
     assert r1.shown and dl1.shown and dl1.message.text == ""
 
 
+def test_live_sampling(subarray):
+    """Live: the last event received is sampled every live_period, the same for all the pages"""
+    store = ViewerStore(subarray)
+    session = Browser(store)
+    state = session.state
+    assert state.live_period == 1.0 and session.live_period.value == "1 s"
+    store.push_row("dl1", dl1_row(1))
+    store.push_row("dl1", dl1_row(5, tel_id=2))
+    session.tick()  # a telescope without displayed event shows its first event at once
+    assert state.live_keys == {1: (1, 1), 2: (1, 5)}
+    store.push_row("dl1", dl1_row(2))
+    session.tick()  # before the end of the period: the displayed event stays
+    assert session.event_key(1, "dl1") == (1, 1) and session.event_key(1, "r1") == (1, 1)
+    version = state.version
+    assert state.sample_live(store, now=state.live_time + 1.0)  # one period later: the last event
+    assert session.event_key(1, "dl1") == (1, 2) and state.version > version
+    assert not state.sample_live(store, now=state.live_time + 5.0)  # no new event: nothing changes
+    # the period chosen in the menu, shared by the pages of the browser
+    session.live_period.value = "5 s"
+    assert state.live_period == 5.0 and session.sessions[3].state.live_period == 5.0
+    store.push_row("dl1", dl1_row(3))
+    assert not state.sample_live(store, now=state.live_time + 2.0)
+    assert state.sample_live(store, now=state.live_time + 5.0) and state.live_keys[1] == (1, 3)
+    # leaving the Live mode keeps the event shown
+    session.set_follow(False)
+    assert session.event_key(1) == (1, 3)
+    assert "live" not in session._status_text()
 def test_camera_display_geometry(subarray):
     """The pixels of the displayed cameras touch each other, and the cameras cannot be moved"""
     from sst1mpipe_viewer.components.camera import tiling_geometry

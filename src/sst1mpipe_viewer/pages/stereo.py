@@ -125,8 +125,6 @@ class DL2StereoPage(Page):
         rows = store.event(SUBARRAY_ID, key, (KIND, "trigger")) if key is not None else {}
         data = rows.get(KIND)
         if data is None or not row_is_valid(KIND, data):
-            if session.follow and self._shown:
-                return  # Live: the last valid event displayed is kept until the next valid one
             # a level which is not valid is not displayed
             self._shown = False
             self._show_message(missing_message(session, SUBARRAY_ID, KIND))

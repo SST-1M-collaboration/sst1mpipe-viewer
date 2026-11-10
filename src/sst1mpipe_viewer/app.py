@@ -18,7 +18,7 @@ from importlib.resources import files
 
 import numpy as np
 from bokeh.layouts import column, row
-from bokeh.models import Button, Div, TextInput, Toggle
+from bokeh.models import Button, Div, Select, TextInput, Toggle
 from ctapipe.coordinates import TelescopeFrame
 
 from . import style
@@ -44,6 +44,9 @@ REFRESH_PERIOD = 250
 #: minimum time between two refreshes of an event page for new data (s): at high rates, the
 #: events in between are not displayed (they are all in the statistics)
 EVENT_PERIOD = 0.5
+#: period of the sampling of the displayed events in Live mode (s), and the choices of the menu
+LIVE_PERIOD = 1.0
+LIVE_PERIODS = (1.0, 2.0, 5.0, 10.0)
 #: minimum time between two refreshes of the statistics page for new data (s)
 STATISTICS_PERIOD = 2.0
 #: colormaps of the cameras and of the per pixel fields, color scale (set when the viewer starts)
@@ -97,8 +100,13 @@ class UserState:
     tel_ids : list
         The selected telescopes (chosen in the Array page).
     follow : bool
-        True: the pages show the last events received (Live mode). False: they show the events
-        chosen in ``event_keys``.
+        True: Live mode, the pages show the sampled events ``live_keys``. False: they show the
+        events chosen in ``event_keys``.
+    live_keys : dict
+        ``{tel_id: (obs_id, event_id)}``, in Live mode the event of each telescope shown by all the
+        pages: the last event received, sampled every ``live_period`` seconds (`sample_live`).
+    live_period : float
+        Period of the sampling of the Live mode (s).
     event_keys : dict
         ``{tel_id: (obs_id, event_id)}``, the displayed event of each telescope when not following.
     auto_browse : bool
@@ -111,7 +119,7 @@ class UserState:
         Incremented at each change (`changed`): the other pages of the browser follow it.
     """
 
-    def __init__(self, store):
+    def __init__(self, store, live_period=LIVE_PERIOD):
         self.tel_ids = list(store.tel_ids)  # all the telescopes are selected at first
         # data pushed event by event (a stream): follow the last events; tables only (a file):
         # show the first event of each telescope
@@ -123,6 +131,34 @@ class UserState:
         self.selected_pixels = {}  # {tel_id: [pixel, ...]}
         self.goto_error = None
         self.version = 0
+        self.live_keys = {}
+        self.live_period = live_period
+        self.live_time = -np.inf  # time of the last sampling (monotonic)
+
+    def sample_live(self, store, now=None, force=False):
+        """
+        Live mode: sample the last event received of each telescope (and of the subarray), every
+        ``live_period`` seconds. All the pages of the browser show these events, so that the user
+        has the time to look at them; the events in between are not displayed (they are all in
+        the statistics and the rates).
+
+        Returns
+        -------
+        bool
+            Whether new events were sampled.
+        """
+        now = time.monotonic() if now is None else now
+        # a telescope without displayed event shows its first event at once
+        new_telescope = any(t not in self.live_keys for t in store.event_tel_ids if store.latest_key(t) is not None)
+        if not force and not new_telescope and now - self.live_time < self.live_period:
+            return False
+        self.live_time = now
+        keys = {tel_id: key for tel_id in store.event_tel_ids if (key := store.latest_key(tel_id)) is not None}
+        if keys == self.live_keys:
+            return False
+        self.live_keys = keys
+        self.changed()
+        return True
 
     def changed(self):
         """Mark a change of the state: the pages of the browser are refreshed"""
@@ -136,11 +172,11 @@ class StateRegistry:
         self._states = {}
         self._lock = threading.Lock()
 
-    def get(self, client_id, store):
+    def get(self, client_id, store, live_period=LIVE_PERIOD):
         """The state of a client id (created at the first use)"""
         with self._lock:
             if client_id not in self._states:
-                self._states[client_id] = UserState(store)
+                self._states[client_id] = UserState(store, live_period)
             return self._states[client_id]
 
 
@@ -174,15 +210,18 @@ class ViewerSession:
         the statistics).
     colormap, field_colormap, color_scale : str
         Colormaps of the data cameras and of the per pixel fields, ``"lin"`` or ``"log"`` scale.
+    live_period : float
+        Live mode: period of the sampling of the displayed events (s), for a new state.
     """
 
     def __init__(self, store, doc=None, page="array", state=None, client_id=None,
                  refresh_period=REFRESH_PERIOD, statistics_period=STATISTICS_PERIOD, event_period=EVENT_PERIOD,
-                 colormap=COLORMAP, field_colormap=FIELD_COLORMAP, color_scale=COLOR_SCALE):
+                 colormap=COLORMAP, field_colormap=FIELD_COLORMAP, color_scale=COLOR_SCALE,
+                 live_period=LIVE_PERIOD):
         self.store = store
         self.doc = doc
         self.client_id = client_id or uuid.uuid4().hex[:12]
-        self.state = state if state is not None else UserState(store)
+        self.state = state if state is not None else UserState(store, live_period)
         self.page_name = page
         self.colormap, self.field_colormap, self.color_scale = colormap, field_colormap, color_scale
         self._geometries = {}
@@ -196,6 +235,10 @@ class ViewerSession:
         self.live = Toggle(label="Live", active=self.follow, button_type="success" if self.follow else "default",
                            width=70)
         self.live.on_change("active", lambda attr, old, new: self._live_clicked(new))
+        periods = sorted({*LIVE_PERIODS, self.state.live_period})
+        self.live_period = Select(title="Live: one event every", value=_period_label(self.state.live_period),
+                                  options=[_period_label(p) for p in periods], width=150)
+        self.live_period.on_change("value", lambda attr, old, new: self._set_live_period(new))
         self.prev_button = Button(label="◀ Prev", width=75)
         self.next_button = Button(label="Next ▶", width=75)
         self.prev_button.on_click(lambda: self.step(-1))
@@ -221,7 +264,7 @@ class ViewerSession:
             width=1400, height=80,
         )
         controls = row(column(Div(text=""), row(self.live, self.prev_button, self.next_button)),
-                       self.event_input, column(Div(text=""), self.clear_pixels))
+                       self.event_input, self.live_period, column(Div(text=""), self.clear_pixels))
         self.layout = column(banner, Div(text=self._navigation_html(), width=1400, height=34), controls,
                              self.status, self.page.layout, Div(text=_footer_html(), width=1400),
                              stylesheets=[style.page_stylesheet()])
@@ -335,16 +378,21 @@ class ViewerSession:
     # ---------------------------------------------------------------- event
     def event_key(self, tel_id, kind=None):
         """
-        Key of the displayed event of a telescope: the chosen one, or in Live mode the last event
-        whose level ``kind`` is valid (`sst1mpipe_viewer.validity`; the last event if ``kind`` is None).
+        Key of the displayed event of a telescope: the chosen one, or in Live mode the sampled one
+        (`UserState.sample_live`), the same in all the pages (``kind`` is the data level of the
+        page: its data are shown only if they are valid)
         """
-        if not self.follow:
-            return self.state.event_keys.get(tel_id)
-        return self.store.latest_key(tel_id) if kind is None else self.store.latest_valid_key(tel_id, kind)
+        return self.current_key(tel_id)
 
     def current_key(self, tel_id):
-        """Key of the current event of a telescope: the chosen one, or in Live mode the last event received"""
-        return self.state.event_keys.get(tel_id) if not self.follow else self.store.latest_key(tel_id)
+        """Key of the current event of a telescope: the chosen one, or in Live mode the sampled one"""
+        keys = self.state.live_keys if self.follow else self.state.event_keys
+        return keys.get(tel_id)
+
+    def _set_live_period(self, label):
+        """The period of the sampling of the Live mode was chosen in the menu"""
+        self.state.live_period = float(label.split()[0])
+        self.state.changed()
 
     def go_to(self, value):
         """
@@ -380,11 +428,11 @@ class ViewerSession:
             self._changed()
 
     def _browse(self):
-        """Displayed events when leaving the Live mode: the last events"""
+        """Displayed events when leaving the Live mode: the events shown (sampled), else the last ones"""
         state = self.state
         if state.follow:
             state.event_keys = {t: k for t in self.store.event_tel_ids
-                                if (k := self.store.latest_key(t)) is not None}
+                                if (k := state.live_keys.get(t, self.store.latest_key(t))) is not None}
             state.follow = False
 
     def _live_clicked(self, active):
@@ -480,6 +528,8 @@ class ViewerSession:
         if not state.tel_ids and self.store.tel_ids and state.version == 0:
             state.tel_ids = list(self.store.tel_ids)  # telescopes known after the state was created
         self._auto_browse()
+        if state.follow:
+            state.sample_live(self.store)
         # an action of the user in this page or in another page of the browser
         if state.version != self._state_version:
             self._state_version = state.version
@@ -534,10 +584,12 @@ class ViewerSession:
         telescopes = []
         for tel_id in self.tel_ids:
             label = f"<b style='color: {self.color(tel_id)}'>TEL {tel_id}</b>"
-            if not state.follow:
-                key = state.event_keys.get(tel_id)
+            key = self.current_key(tel_id)
+            event = f"event_id {key[1]}" if key else "no event"
+            if state.follow:
+                label += f" {event}"
+            else:
                 position, n_events = self.store.event_position(tel_id, key)
-                event = f"event_id {key[1]}" if key else "no event"
                 label += f" {event} ({'?' if position is None else position + 1} / {n_events})"
             pixels = self.selected_pixels(tel_id)
             if len(pixels) > 10:
@@ -545,13 +597,19 @@ class ViewerSession:
             elif pixels:
                 label += f" [pixels {', '.join(str(p) for p in pixels)}]"
             telescopes.append(label)
-        mode = "following the last events" if state.follow else "browsing"
+        mode = (f"live: the last event received, every {_period_label(state.live_period)}" if state.follow
+                else "browsing")
         if state.goto_error:
             mode += f" &nbsp;<span style='color: {style.ERROR}'>{state.goto_error}</span>"
         return (
             f"<b>Source</b>: {source} &nbsp;|&nbsp; {' &nbsp; '.join(telescopes) or 'no telescope selected'}"
             f" &nbsp;|&nbsp; {mode}"
         )
+
+
+def _period_label(period):
+    """Label of a period of the Live mode in the menu, e.g. ``1 s``"""
+    return f"{period:g} s"
 
 
 def _client_id(doc):
@@ -569,5 +627,6 @@ def _client_id(doc):
 def make_document(store, doc, page="array", registry=None, **kwargs):
     """Fill a bokeh document with a page of the viewer on ``store`` (bokeh application handler)"""
     client_id = _client_id(doc) or uuid.uuid4().hex[:12]
-    state = registry.get(client_id, store) if registry is not None else None
+    live_period = kwargs.get("live_period", LIVE_PERIOD)
+    state = registry.get(client_id, store, live_period) if registry is not None else None
     ViewerSession(store, doc, page=page, state=state, client_id=client_id, **kwargs)

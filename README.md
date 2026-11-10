@@ -33,7 +33,7 @@ click on a camera pixel selects it for its telescope on all the pages (shift+cli
 removes a pixel); each telescope has its own selection. The displayed events are chosen in the
 header:
 
-- **Live**: the last event received (data pushed event by event, e.g. a stream);
+- **Live**: the last event received, sampled every second (data pushed event by event, e.g. a stream);
 - **◀ Prev** / **Next ▶**: the previous / next event of all the selected telescopes (◀ / ▶ next to
   a telescope name: of this telescope only);
 - **Event id**: an `event_id`, or `#index` for the index of the event (`#0` the first, `#-1` the last).
@@ -47,9 +47,15 @@ from the timestamps of the events (trigger `time` or `event_time`; the events wi
 are not counted), with error bars for the statistical uncertainty (√N / duration). A dashed
 vertical line marks the time of the displayed event of each telescope.
 
-**Only valid levels are displayed.** In Live mode a page shows the last event whose level is
-valid, and keeps it until the next valid one. When browsing, an event whose level is missing or
-not valid is not displayed (a message says so).
+**Live sampling.** In Live mode the last event received of each telescope (and of the
+subarray) is sampled every second, and all the pages show these same events until the next
+sampling: the user has the time to look at them. The period is chosen in the header (1, 2, 5 or
+10 s) or with `--live-period`. The events in between are not displayed, but they are all in the
+statistics and the rates.
+
+**Only valid levels are displayed.** A page shows the level of the displayed event only if it is
+valid; otherwise a message says so (e.g. "No valid DL1 data in event N": the last event received
+had no Hillas parameters, or no waveforms for the R0 page).
 
 The cameras are drawn with pixels touching each other (the area of their grid cell, from the pitch
 of the pixels, instead of their sensitive area which leaves gaps), and the cameras and waveform
