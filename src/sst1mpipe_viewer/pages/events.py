@@ -32,6 +32,8 @@ class _TelescopeImage:
                                            on_pixel_click=session.pixel_click(tel_id), width=460, height=430)
         self.layout = column(row(self.header, self.message), self.camera.layout)
         self.shown = False  # an event is displayed
+        self.has_image = False  # its camera shows an image
+        self.table_rows = None  # its rows in the table of the fields
 
     def show_message(self, message):
         """Show a message above the camera, None for none (only sent to the browser if it changed)"""
@@ -117,9 +119,9 @@ class ImageEventPage(Page):
         for tel_id, (key, rows, geometry) in events.items():
             view = self.views[tel_id]
             data = rows.get(self.kind)
-            if data is not None:
-                table[tel_id] = {self.kind: data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
             self._show(tel_id, view, key, rows, data, geometry)
+            if view.table_rows is not None:
+                table[tel_id] = view.table_rows
         self.fields.set_rows(table)
 
     def _source(self, tel_id, key, data):
@@ -137,7 +139,12 @@ class ImageEventPage(Page):
         camera = view.camera
         # the id of the displayed event, in red (the pages can show different events)
         displayed = data is not None and row_is_valid(self.kind, data)
+        if not displayed and session.follow and view.shown and geometry is not None:
+            # Live: the event displayed stays until another one can be displayed (no empty camera in between)
+            return
         set_event_label(view.event_label, key if displayed or not session.follow else None)
+        view.table_rows = None if data is None else {
+            self.kind: data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
         if geometry is None:
             view.shown = False
             view.show_message("No camera geometry (no subarray).")
@@ -159,8 +166,9 @@ class ImageEventPage(Page):
         camera.set_title(name)
         if name in image and np.shape(image[name]) == (geometry.n_pixels,):
             camera.set_image(np.asarray(image[name], dtype=float))
-        else:
+        elif not (session.follow and view.has_image):
             camera.clear()
+        view.has_image = name in image or (session.follow and view.has_image)
         camera.set_mask(image.get("image_mask") if SHOW_MASK in self.options.active else None)
         # the Hillas parameters are in the DL1 row, and in the DL2 row of sst1mpipe
         hillas = image if "hillas_fov_lon" in image else data

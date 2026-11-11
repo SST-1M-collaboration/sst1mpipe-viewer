@@ -125,6 +125,9 @@ class DL2StereoPage(Page):
         rows = store.event(SUBARRAY_ID, key, (KIND, "trigger")) if key is not None else {}
         data = rows.get(KIND)
         displayed = data is not None and row_is_valid(KIND, data)
+        if not displayed and session.follow and self._shown:
+            # Live: the event displayed stays until another one can be displayed
+            return
         set_event_label(self.event_label, key if displayed or not session.follow else None)
         if data is None or not row_is_valid(KIND, data):
             # a level which is not valid is not displayed

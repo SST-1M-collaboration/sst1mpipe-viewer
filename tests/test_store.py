@@ -309,3 +309,16 @@ def test_reset_everything(subarray):
     assert "image" in store.event(1, (1, 1))["dl1"]
     store.push_row("dl1", dl1_row(2))
     assert store.statistics(1, "dl1")["n_rows"] == 1
+
+
+def test_sampled_display_events_stay_readable(subarray):
+    """an event sampled by a page stays readable after newer full events and max_events newer events"""
+    store = ViewerStore(subarray, max_events=3)
+    store.push_row("r1", r1_row(1))
+    sampled = store.latest_display_key(1, "r1")
+    for i in range(2, 6):
+        store.push_row("r1", r1_row(i))  # newer full events
+        for j in range(5):
+            store.push_row("trigger", {"obs_id": 1, "event_id": 100 * i + j, "tel_id": 1, "event_type": 32})
+    assert store.latest_display_key(1, "r1") == (1, 5) and sampled not in store.event_keys(1)
+    assert "waveform" in store.event(1, sampled, ("r1",))["r1"]

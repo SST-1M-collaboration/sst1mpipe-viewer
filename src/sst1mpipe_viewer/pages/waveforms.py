@@ -88,6 +88,7 @@ class _TelescopeWaveforms:
             rows.append(row(self.trigger.layout, self.trigger.traces.layout))
         self.layout = column(row(self.header, self.sample, self.message), *rows)
         self.shown = False  # an event is displayed
+        self.table_rows = None  # its rows in the table of the fields
 
     def set_sample_range(self, n_samples):
         """Range of the sample slider: the samples of the waveforms and of the trigger traces"""
@@ -237,13 +238,20 @@ class WaveformPage(Page):
         for tel_id, (key, rows, data, geometry, shapes) in events.items():
             view = self.views[tel_id]
             # the id of the displayed event, in red (the pages can show different events)
-            set_event_label(view.event_label, key if tel_id in shown or not session.follow else None)
+            persist = tel_id not in shown and geometry is not None and session.follow and view.shown
+            if not persist:
+                set_event_label(view.event_label, key if tel_id in shown or not session.follow else None)
             if tel_id in shown:
                 view.update(key, rows, data, geometry)
                 view.show_message(None)
-                table[tel_id] = {self.kind: data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
+                view.table_rows = {self.kind: data, **({"trigger": rows["trigger"]} if "trigger" in rows else {})}
+                table[tel_id] = view.table_rows
             elif geometry is None:
                 view.clear("No camera geometry (no subarray).")
+            elif persist:
+                # Live: the event displayed stays until another one can be displayed (no empty camera
+                # in between)
+                table[tel_id] = view.table_rows
             else:
                 # a level which is not valid is not displayed
                 view.clear(missing_message(session, tel_id, self.kind))

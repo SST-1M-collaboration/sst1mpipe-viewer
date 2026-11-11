@@ -435,3 +435,32 @@ def test_live_samples_the_last_full_event(subarray):
     assert session.event_key(1, "r1") == (1, 1) and session.event_key(1, "dl1") == (1, 1)
     refresh_all(session)
     assert session.pages[2].views[1].shown and session.pages[4].views[1].shown
+
+
+def test_live_display_is_persistent(subarray):
+    """Live: the camera keeps its image when the sampled event cannot be displayed (no empty camera in between)"""
+    from sst1mpipe_viewer.app import ViewerSession
+
+    store = ViewerStore(subarray)
+    store.push_row("r1", r1_row(1))
+    session = ViewerSession(store, None, page="r1")
+    session.tick()
+    view = session.page.views[1]
+    assert session.state.follow and view.shown
+    image = np.array(view.camera.display.datasource.data["values"])
+    label = view.event_label.text
+    assert np.isfinite(image).all()
+
+    # the sampled event is forgotten (e.g. evicted): the display stays as it is
+    session.state.live_keys[1]["r1"] = (1, 999)
+    session.request_refresh()
+    session.tick()
+    assert view.shown and view.event_label.text == label
+    np.testing.assert_array_equal(view.camera.display.datasource.data["values"], image)
+
+    # when browsing, an event without data shows an empty camera
+    session.state.follow = False
+    session.state.event_keys[1] = (1, 999)
+    session.request_refresh()
+    session.tick()
+    assert not view.shown and np.isnan(view.camera.display.datasource.data["values"]).all()

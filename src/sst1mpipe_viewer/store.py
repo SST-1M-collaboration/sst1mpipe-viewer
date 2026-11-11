@@ -85,6 +85,8 @@ CONVERTED_CACHE_SIZE = 64
 TIME_COLUMNS = ("time", "event_time")
 
 
+#: number of the last displayable events of each telescope and data level kept for the pages
+DISPLAY_EVENTS = 8
 #: kinds whose containers pushed event by event are converted only when displayed
 LAZY_KINDS = ("r0", "r1", "dl0")
 
@@ -233,9 +235,10 @@ class ViewerStore:
         self._latest = {}  # (tel_id, kind) -> (obs_id, event_id)
         self._counts = Counter()  # (tel_id, kind) -> number of rows received
         self._arrivals = {}  # (tel_id, kind) -> deque of [time, n rows] of the last RATE_WINDOW s
-        # (tel_id, kind) -> (obs_id, event_id) and rows of the last event whose level can be displayed
-        # (valid, with its image for the DL1): kept even when it leaves the last max_events events
-        # (the stream of the pipeline sends the waveforms and the images every second only)
+        # (tel_id, kind) -> (obs_id, event_id) of the last event whose level can be displayed (valid,
+        # with its image for the DL1), and the last DISPLAY_EVENTS of them {key: rows}: kept even when
+        # they leave the last max_events events (the stream of the pipeline sends the waveforms and
+        # the images every second only), so that a page still finds the event it sampled a moment ago
         self._latest_display = {}
         self._display_events = {}
         self._latest_valid = {}  # (tel_id, kind) -> (obs_id, event_id) of the last event with a valid level
@@ -467,7 +470,18 @@ class ViewerStore:
     def _set_display(self, tel_id, key, kind):
         """The level ``kind`` of the event ``key`` can be displayed: it is the last one of its level"""
         self._latest_display[(tel_id, kind)] = key
-        self._display_events[(tel_id, kind)] = self._events[tel_id][key]
+        events = self._display_events.setdefault((tel_id, kind), OrderedDict())
+        events[key] = self._events[tel_id][key]
+        events.move_to_end(key)
+        while len(events) > DISPLAY_EVENTS:
+            events.popitem(last=False)
+
+    def _display_event(self, tel_id, key):
+        """Rows ``{kind: row}`` of a displayable event kept after it left the last events ({} if unknown)"""
+        for (tel, _), events in self._display_events.items():
+            if tel == tel_id and key in events:
+                return events[key]
+        return {}
 
     def _is_displayable(self, tel_id, key, kind, row):
         """
@@ -481,6 +495,7 @@ class ViewerStore:
             def has_image(event):
                 return "image" in _as_row(event.get("dl1", {}))
             shown = self._display_events.get((tel_id, kind))
+            shown = next(reversed(shown.values())) if shown else None
             return has_image(self._events[tel_id][key]) or shown is None or not has_image(shown)
         return True
 
@@ -694,9 +709,8 @@ class ViewerStore:
             result = tables.event(key, kinds) if tables is not None and key in tables.positions else {}
             pushed = self._events.get(tel_id, {}).get(key)
             if pushed is None:
-                # the last event displayable of a level, which may have left the last max_events events
-                pushed = next((self._display_events[(t, k)] for (t, k), latest in self._latest_display.items()
-                               if t == tel_id and latest == key), {})
+                # a displayable event of a level, which may have left the last max_events events
+                pushed = self._display_event(tel_id, key)
             for kind, row in pushed.items():
                 if kinds is None or kind in kinds:
                     result[kind] = {**result.get(kind, {}), **_as_row(row)}
@@ -778,9 +792,8 @@ class ViewerStore:
             value = tables.times.get(key) if tables is not None else None
             if value is None:
                 event = self._events.get(tel_id, {}).get(key)
-                if event is None:  # the displayed event of a level, which left the last events
-                    event = next((self._display_events[(t, k)] for (t, k), latest in self._latest_display.items()
-                                  if t == tel_id and latest == key), {})
+                if event is None:  # a displayable event of a level, which left the last events
+                    event = self._display_event(tel_id, key)
                 for row in event.values():
                     row = _as_row(row)
                     value = next((row[name] for name in TIME_COLUMNS if name in row), None)
