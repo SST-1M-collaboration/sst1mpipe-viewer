@@ -309,6 +309,15 @@ class ViewerStore:
         tel_id = SUBARRAY_ID if kind == "dl2_stereo" else tel_id
         self._push_event_row(kind, to_row(row, obs_id=obs_id, event_id=event_id, tel_id=tel_id))
 
+    def push_plain_row(self, kind, row):
+        """
+        Push a row whose values are already plain (numbers, strings, numpy arrays in the units of
+        the tables, as the rows of the messages of the pipeline) and which has its ``obs_id``,
+        ``event_id`` and ``tel_id``: `push_row` without the conversion of the values (fast path
+        of the live stream). The row is kept: it must not be modified afterwards.
+        """
+        self._push_event_row(kind, row)
+
     def push_event(self, event, tel_ids=None, stereo=True):
         """
         Push the data of a ctapipe ``ArrayEventContainer``: the R0, R1, DL0, DL1, DL2 and
@@ -535,14 +544,8 @@ class ViewerStore:
                 self._count_valid(tel_id, key, kind, event_time)
             self._count(tel_id, kind, 1, now)
             if kind in STATISTICS_KINDS:
-                # the statistics are filled later, in batches: only the columns they use are kept
-                if kind in DL2_KINDS:
-                    kept = {name: np.asarray(value)[np.newaxis] for name, value in row.items() if np.ndim(value) == 0}
-                else:
-                    needed = self._needed(kind)
-                    kept = {name: np.asarray(value)[np.newaxis] for name, value in row.items()
-                            if name in needed or name.startswith(CAMERA_FRAME_PREFIX)}
-                self._pending.setdefault((kind, tel_id), []).append(kept)
+                # the statistics are filled later, in batches (`_flush`): the row is only kept here
+                self._pending.setdefault((kind, tel_id), []).append(row)
                 self._n_pending += 1
                 if self._n_pending >= self.flush_size:
                     self._flush()
@@ -562,14 +565,20 @@ class ViewerStore:
         for key in list(self._pending):
             if (kind is not None and key[0] != kind) or (tel_id is not None and key[1] != tel_id):
                 continue
-            chunks = self._pending.pop(key)
-            # rows with the same columns are filled together
+            rows = self._pending.pop(key)
+            self._n_pending -= len(rows)
+            # rows with the same fields are filled together
             groups = {}
-            for chunk in chunks:
-                groups.setdefault(tuple(sorted(chunk)), []).append(chunk)
-                self._n_pending -= n_rows(chunk)
+            for row in rows:
+                groups.setdefault(tuple(row), []).append(row)
             for names, group in groups.items():
-                columns = {name: np.concatenate([chunk[name] for chunk in group]) for name in names}
+                # only the columns used by the statistics: for the DL2, all the fields with one number
+                if key[0] in DL2_KINDS:
+                    names = [name for name in names if np.ndim(group[0][name]) == 0]
+                else:
+                    needed = self._needed(key[0])
+                    names = [name for name in names if name in needed or name.startswith(CAMERA_FRAME_PREFIX)]
+                columns = {name: np.asarray([row[name] for row in group]) for name in names}
                 columns = self._telescope_frame(key[1], columns)
                 self._fill_statistics(*key, columns)
 

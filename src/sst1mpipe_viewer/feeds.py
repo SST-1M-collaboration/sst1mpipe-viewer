@@ -506,11 +506,12 @@ class ZMQFeed(_ThreadedFeed):
     def push(self, levels):
         """Push the data levels ``{level: row}`` of a message (those of the telescopes and stereo selected)"""
         for level, row in levels.items():
+            # the rows of the messages are already plain values: no conversion
             if level == "dl2_stereo":
                 if self.stereo:
-                    self.store.push_row(level, row)
+                    self.store.push_plain_row(level, row)
             elif self.tel_ids is None or int(row["tel_id"]) in self.tel_ids:
-                self.store.push_row(level, row)
+                self.store.push_plain_row(level, row)
 
     def run(self):
         """Receive and push the events until the feed is stopped (blocking)"""
