@@ -1,8 +1,8 @@
 """Displays of the accumulated histograms (`sst1mpipe_viewer.accumulators`)"""
 
 import numpy as np
-from bokeh.layouts import Spacer, column, row
-from bokeh.models import Button, ColorBar, ColumnDataSource, LinearColorMapper, LogColorMapper, Range1d, Title
+from bokeh.layouts import column
+from bokeh.models import ColorBar, ColumnDataSource, LinearColorMapper, LogColorMapper, Range1d, Title
 from bokeh.palettes import Viridis256
 from bokeh.plotting import figure
 
@@ -44,7 +44,7 @@ class Histogram1DPanel:
     """
     Display of `~sst1mpipe_viewer.accumulators.Histogram1D` snapshots of several telescopes,
     superimposed with the color of each telescope, with their statistics (entries, mean, std,
-    under/overflow) and a reset button calling ``on_reset``.
+    under/overflow).
 
     Parameters
     ----------
@@ -56,7 +56,7 @@ class Histogram1DPanel:
         Name of each series in the captions ``{tel_id: label}``, ``TEL <tel_id>`` by default.
     """
 
-    def __init__(self, name, title=None, x_label=None, log_y=False, on_reset=None, width=330, height=270,
+    def __init__(self, name, title=None, x_label=None, log_y=False, width=330, height=270,
                  colors=None, labels=None, log_x=False):
         self.name = name
         self._labels = labels or {}
@@ -85,10 +85,7 @@ class Histogram1DPanel:
         for tel_id, color in colors.items():
             self.captions[tel_id] = add_caption(self.figure)
             self.captions[tel_id].text_color = color
-        self.reset_button = Button(label="Reset", width=60, height=26, button_type="light")
-        if on_reset is not None:
-            self.reset_button.on_click(lambda: on_reset(self.name))
-        self.layout = column(self.figure, row(Spacer(width=width - 70), self.reset_button))
+        self.layout = column(self.figure)
 
     def invalidate(self):
         """Show the next snapshots even if they look like the last ones"""
@@ -131,7 +128,7 @@ class Histogram1DPanel:
 class Histogram2DPanel:
     """Display of a `~sst1mpipe_viewer.accumulators.Histogram2D` snapshot"""
 
-    def __init__(self, name, title=None, x_label=None, y_label=None, on_reset=None, log_z=False,
+    def __init__(self, name, title=None, x_label=None, y_label=None, log_z=False,
                  width=380, height=330, log_x=False, log_y=False):
         self.name = name
         self._ranges_set = False
@@ -152,10 +149,7 @@ class Histogram2DPanel:
                           color_mapper=self.color_mapper)
         self.figure.add_layout(ColorBar(color_mapper=self.color_mapper, width=10, border_line_color=None), "right")
         self.stats = add_caption(self.figure)
-        self.reset_button = Button(label="Reset", width=60, height=26, button_type="light")
-        if on_reset is not None:
-            self.reset_button.on_click(lambda: on_reset(self.name))
-        self.layout = column(self.figure, row(Spacer(width=width - 70), self.reset_button))
+        self.layout = column(self.figure)
 
     def invalidate(self):
         """Show the next snapshot even if it looks like the last one"""

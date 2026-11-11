@@ -48,11 +48,10 @@ def test_dl3_data():
     times, rates, errors = data.rate_history()
     assert len(times) == 3 and np.allclose(rates, 2.5, rtol=0.1)  # 250 events in 100 s, per minute
     assert np.allclose(errors[1], np.sqrt(rates[1] * 60) / 60)
-    data.reset("theta2")
-    assert data.statistics()["accumulators"]["theta2"]["n_entries"] == 0 and data.observations()
     data.reset()
     assert not data.observations() and len(data.rate_history()[0]) == 0
-    assert len(changes) == 4
+    assert data.statistics()["accumulators"]["theta2"]["n_entries"] == 0
+    assert len(changes) == 3
 
 
 def test_dl3_file_and_page(tmp_path, subarray):
@@ -75,7 +74,7 @@ def test_dl3_file_and_page(tmp_path, subarray):
     assert page.hist1d[0].captions[SUBARRAY_ID].text.startswith("Subarray: N=200")
     assert page.hist2d[("sky", SUBARRAY_ID)].source.data["image"]
     assert len(page.maps.children[0].children) == 1
-    page._reset()
+    store.reset()  # the single reset of the viewer
     page.refresh()  # done at once by the session in a browser
     assert page.observations_source.data["n_events"] == []
 

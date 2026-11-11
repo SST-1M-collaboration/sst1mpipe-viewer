@@ -12,6 +12,7 @@ from .config import load_statistics_config
 from .feeds import HDF5Feed, ReplayClock, is_zmq_endpoint, make_feed
 from .server import serve
 from .store import ViewerStore
+from .sunset import SunsetReset
 
 __all__ = ["main", "default_subarray_file", "make_streams", "run_streams"]
 
@@ -87,6 +88,9 @@ def parse_args(argv=None):
                         help="colormap of the cameras of the per pixel fields (default: %(default)s)")
     parser.add_argument("--color-scale", choices=["lin", "log"], default="lin",
                         help="color scale of the cameras (default: %(default)s)")
+    parser.add_argument("--sunset-reset", choices=["auto", "on", "off"], default="auto",
+                        help="reset all the plots at sunset at the site (from the system time): 'auto' with a live"
+                             " stream (ZMQ endpoint) only (default: %(default)s)")
     parser.add_argument("--show", action="store_true", help="open the viewer in a browser")
     args = parser.parse_args(argv)
     if args.stereo and (args.tel1 or args.tel2):
@@ -120,6 +124,11 @@ def main(argv=None):
         # the files are read in the background: the server starts at once
         threading.Thread(target=run_streams, args=(streams, args.replay_speed, args.loop),
                          name="sst1mpipe-viewer-streams", daemon=True).start()
+
+    live = any(is_zmq_endpoint(path) for path in [*args.tel1, *args.tel2, *args.stereo])
+    if args.sunset_reset == "on" or (args.sunset_reset == "auto" and live):
+        # a new night starts with empty plots
+        SunsetReset(store).start()
 
     log.info("SST-1M viewer at http://%s:%d/", args.address or "localhost", args.port)
     serve(store, port=args.port, address=args.address, allow_websocket_origin=args.allow_websocket_origin,

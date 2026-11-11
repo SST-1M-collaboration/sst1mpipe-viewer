@@ -245,14 +245,10 @@ class DL3Data:
                 self._rates[series] = binned_rates(np.concatenate(times) if times else np.empty(0))
             return self._rates[series]
 
-    def reset(self, name=None):
-        """Forget the events received (or reset one histogram ``name`` only, for all the series)"""
+    def reset(self):
+        """Forget the events received"""
         with self._lock:
-            if name is None:
-                self._clear()
-            else:
-                for statistics in self._statistics.values():
-                    statistics.reset(name)
+            self._clear()
         if self._on_change is not None:
             self._on_change()
 

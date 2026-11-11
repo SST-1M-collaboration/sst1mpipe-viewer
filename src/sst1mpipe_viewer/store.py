@@ -213,6 +213,10 @@ class ViewerStore:
         #: the receivers of the ZMQ streams ``{url: receiver}`` (their ``received`` and ``lost`` messages)
         self.streams = {}
         self.version = 0  # incremented at each change
+        #: system time (unix s) of the last `reset`, None if never reset
+        self.reset_time = None
+        #: system time (unix s) of the next automatic reset (`sst1mpipe_viewer.sunset`), None if none
+        self.next_reset_time = None
         #: the DL3 events (not per telescope): ``store.dl3.push(events, header)``
         self.dl3 = DL3Data(configs.get("dl3"), on_change=self._changed)
         self._clear()
@@ -818,15 +822,25 @@ class ViewerStore:
             return self._tel_statistics(kind, tel_id, combination=combination).snapshot()
 
     # ---------------------------------------------------------------- control
-    def reset_statistics(self, tel_id=None, name=None, kind="dl1"):
-        """Reset the statistics of a data level: of one accumulator ``name``, of a telescope, or of all"""
+    def reset(self):
+        """
+        Reset every plot: the statistics of all the data levels and telescopes, the rates in time,
+        the counters of the rows received and the DL3 data. The events stay displayed (the last
+        ones, and those of the files loaded as tables, whose rates are those of the file).
+        """
         with self._lock:
-            # the buffered rows were received before the reset
-            self._flush(tel_id, kind)
-            for key, statistics in self._statistics.items():
-                if key[0] == kind and tel_id in (None, key[1]):
-                    statistics.reset(name)
+            self._pending.clear()  # the buffered rows were received before the reset
+            self._n_pending = 0
+            for statistics in self._statistics.values():
+                statistics.reset()
+            self._history.clear()
+            self._history_start.clear()
+            self._rate_events.clear()
+            self._counts.clear()
+            self._arrivals.clear()
+            self.reset_time = time.time()
             self.version += 1
+        self.dl3.reset()
 
     def clear(self):
         """Forget all the events and statistics"""

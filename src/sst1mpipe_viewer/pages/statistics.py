@@ -7,7 +7,7 @@ the viewer, it belongs to the pipeline.
 """
 
 from bokeh.layouts import column, row
-from bokeh.models import Button, ColumnDataSource, DataTable, Div, Select, TableColumn
+from bokeh.models import ColumnDataSource, DataTable, Div, Select, TableColumn
 
 from ..components import Histogram1DPanel, Histogram2DPanel
 from ..config import display_options
@@ -80,7 +80,7 @@ class StatisticsPage(Page):
             Histogram1DPanel(
                 spec.get("name", spec["column"]), title=spec.get("title", spec["column"]),
                 x_label=axis_label(spec["column"], spec.get("transform"), spec.get("unit")),
-                on_reset=self._reset_selected, colors=colors, labels=labels,
+                colors=colors, labels=labels,
                 **options[spec.get("name", spec["column"])],
             )
             for spec in config.get("hist1d", ())
@@ -93,7 +93,7 @@ class StatisticsPage(Page):
                 panel = Histogram2DPanel(
                     name, title=f"{spec.get('title') or name} – {labels[tel_id]}",
                     x_label=axis_label(spec["x"], spec.get("x_transform")),
-                    y_label=axis_label(spec["y"], spec.get("y_transform")), on_reset=self._reset_selected,
+                    y_label=axis_label(spec["y"], spec.get("y_transform")),
                     **options[name],
                 )
                 panel.figure.title.text_color = colors[tel_id]
@@ -108,20 +108,13 @@ class StatisticsPage(Page):
             TableColumn(field="tel", title="Telescope", width=100),
             TableColumn(field="rows", title=f"{level} rows accumulated", width=200),
         ])
-        self.reset_tel = Button(label="Reset selected telescopes", width=190, button_type="warning")
-        self.reset_tel.on_click(lambda: self._reset_selected())
-        self.reset_all = Button(label="Reset all telescopes", width=150, button_type="danger")
-        self.reset_all.on_click(lambda: self._reset_all())
         self.legend = Div(text="", height=24)
         self.correlations = column()
         self._shown_tel_ids = None
 
-        self.reset_tel.visible = not self.stereo
-        if self.stereo:
-            self.reset_all.label = "Reset the stereo statistics"
         sections = [
             row(*self.algorithm_selects.values()),
-            row(self.counters, column(Div(text=""), row(self.reset_tel, self.reset_all))),
+            self.counters,
             self.legend,
             _section("Parameter distributions"),
             _grid([p.layout for p in self.hist1d], 4),
@@ -129,18 +122,6 @@ class StatisticsPage(Page):
         if self.hist2d:
             sections += [_section("Correlations"), self.correlations]
         self.layout = column(*sections)
-
-    # ---------------------------------------------------------------- resets
-    def _reset_all(self):
-        """Reset the statistics of all the telescopes"""
-        self.store.reset_statistics(kind=self.kind)
-        self.session.request_refresh()
-
-    def _reset_selected(self, name=None):
-        """Reset the statistics of the selected telescopes (one histogram ``name``, or all)"""
-        for tel_id in self._tel_ids():
-            self.store.reset_statistics(tel_id, name, kind=self.kind)
-        self.session.request_refresh()
 
     # ------------------------------------------------------------ algorithms
     def algorithms(self):

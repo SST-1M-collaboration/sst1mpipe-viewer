@@ -10,7 +10,7 @@ there is a single series, that of the subarray.
 
 from astropy.time import Time
 from bokeh.layouts import column, row
-from bokeh.models import Button, ColumnDataSource, DataTable, Div, TableColumn
+from bokeh.models import ColumnDataSource, DataTable, Div, TableColumn
 
 from ..components import Histogram1DPanel, Histogram2DPanel, RatePanel
 from ..components.histogram import format_number
@@ -69,7 +69,7 @@ class DL3Page(Page):
             Histogram1DPanel(
                 spec.get("name", spec["column"]), title=spec.get("title", spec["column"]),
                 x_label=axis_label(spec["column"], spec.get("transform"), spec.get("unit")),
-                on_reset=self._reset, colors=colors, labels=labels, width=480, height=320,
+                colors=colors, labels=labels, width=480, height=320,
                 **options[spec.get("name", spec["column"])],
             )
             for spec in config.get("hist1d", ())
@@ -82,7 +82,7 @@ class DL3Page(Page):
                 panel = Histogram2DPanel(
                     name, title=f"{spec.get('title') or name} – {labels[series]}",
                     x_label=axis_label(spec["x"], spec.get("x_transform"), "deg"),
-                    y_label=axis_label(spec["y"], spec.get("y_transform"), "deg"), on_reset=self._reset,
+                    y_label=axis_label(spec["y"], spec.get("y_transform"), "deg"),
                     width=480, height=420, **options[name],
                 )
                 panel.figure.title.text_color = colors[series]
@@ -92,20 +92,13 @@ class DL3Page(Page):
         self._hist2d_names = list(dict.fromkeys(name for name, _ in self.hist2d))
         self.maps = column()
         self._shown_series = None
-        self.reset_all = Button(label="Reset the DL3 data", width=160, button_type="danger")
-        self.reset_all.on_click(lambda: self._reset())
         self.layout = column(
             Div(text="<h3 style='margin: 8px 0 0 0'>Observations</h3>"),
-            row(self.observations, self.reset_all),
+            self.observations,
             self.rates.layout,
             row([p.layout for p in self.hist1d]),
             self.maps,
         )
-
-    def _reset(self, name=None):
-        """Forget the DL3 data received (or reset one histogram ``name``)"""
-        self.store.dl3.reset(name)
-        self.session.request_refresh()
 
     def _observations(self, observations):
         """Columns of the observations table from the summaries of `DL3Data.observations`"""

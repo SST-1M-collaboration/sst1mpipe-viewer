@@ -266,6 +266,9 @@ class ViewerSession:
         self.event_input.on_change("value", lambda attr, old, new: self.go_to(new))
         self.clear_pixels = Button(label="Clear pixel selection", width=150)
         self.clear_pixels.on_click(self.clear_selected_pixels)
+        # the only reset of the viewer: every plot of every page, for everyone
+        self.reset_button = Button(label="Reset all plots", width=120, button_type="danger")
+        self.reset_button.on_click(self.reset_plots)
         self.status = Div(text="", styles={"font-size": "10pt", "color": style.MUTED}, width=1400, height=40)
 
         _, title, factory = PAGES[page]
@@ -283,7 +286,8 @@ class ViewerSession:
             width=1400, height=80,
         )
         controls = row(column(Div(text=""), row(self.live, self.prev_button, self.next_button)),
-                       self.event_input, self.live_period, column(Div(text=""), self.clear_pixels))
+                       self.event_input, self.live_period,
+                       column(Div(text=""), row(self.clear_pixels, self.reset_button)))
         self.layout = column(banner, Div(text=self._navigation_html(), width=1400, height=34), controls,
                              self.status, self.page.layout, Div(text=_footer_html(), width=1400),
                              stylesheets=[style.page_stylesheet()])
@@ -508,6 +512,11 @@ class ViewerSession:
             self.state.selected_pixels = {}
             self._changed()
 
+    def reset_plots(self):
+        """Reset every plot of the viewer (statistics, rates, DL3), for everyone"""
+        self.store.reset()
+        self.request_refresh()
+
     # -------------------------------------------------------------- refresh
     def request_refresh(self):
         """Refresh the page: at once after an action of the user (not at the next periodic check)"""
@@ -622,6 +631,9 @@ class ViewerSession:
                 else "browsing")
         if state.goto_error:
             mode += f" &nbsp;<span style='color: {style.ERROR}'>{state.goto_error}</span>"
+        next_reset = self.store.next_reset_time
+        if next_reset is not None:
+            mode += f" &nbsp;|&nbsp; plots reset at sunset, {time.strftime('%H:%M', time.gmtime(next_reset))} UTC"
         return (
             f"<b>Source</b>: {source} &nbsp;|&nbsp; {' &nbsp; '.join(telescopes) or 'no telescope selected'}"
             f" &nbsp;|&nbsp; {mode}"

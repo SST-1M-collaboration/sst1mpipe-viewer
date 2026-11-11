@@ -33,11 +33,9 @@ def test_statistics_and_reset(subarray):
     assert snapshot["accumulators"]["hillas_length"]["n_entries"] == 10
 
     version = store.version
-    store.reset_statistics(1, "hillas_length")
-    assert store.statistics(1)["accumulators"]["hillas_length"]["n_entries"] == 0
-    assert store.statistics(1)["accumulators"]["hillas_width"]["n_entries"] == 10
-    store.reset_statistics()
+    store.reset()
     assert store.statistics(1)["n_rows"] == 0
+    assert store.statistics(1)["accumulators"]["hillas_length"]["n_entries"] == 0
     assert store.version > version
 
 
@@ -63,8 +61,8 @@ def test_dl2(subarray):
     assert store.event(2, (1, 9))["dl2"]["sst1mpipe_tel_prediction"] == 0.9
     assert store.algorithms(2) == {"energy": ["sst1mpipe"], "classification": ["sst1mpipe"]}
     assert store.statistics(2, "dl2")["accumulators"]["energy"]["n_entries"] == 1
-    store.reset_statistics(kind="dl2")
-    assert store.statistics(1, "dl2")["n_rows"] == 0
+    store.reset()
+    assert store.statistics(1, "dl2")["n_rows"] == 0 and store.statistics(1, "dl1")["n_rows"] == 0
 
 
 def test_dl2_stereo(subarray):
@@ -291,3 +289,23 @@ def test_dl2_displayed_with_its_image(subarray):
     assert store.latest_display_key(1, "dl2") == (1, 3)
     assert "image" in store.event(1, (1, 3))["dl1"]
     assert store.event_time(1, (1, 3)) == 1.7e9
+
+
+def test_reset_everything(subarray):
+    """a single reset: the statistics of all the levels, the rates and the counters; the events stay"""
+    store = ViewerStore(subarray)
+    store.push_row("trigger", {"obs_id": 1, "event_id": 1, "tel_id": 1, "time": 1.7e9})
+    store.push_row("dl1", dl1_row(1))
+    assert store.statistics(1, "dl1")["n_rows"] == 1
+    assert len(store.rate_history(1, "dl1")[0]) > 0 and store.counts()[(1, "dl1")] == 1
+    assert store.reset_time is None
+
+    store.reset()
+
+    assert store.statistics(1, "dl1")["n_rows"] == 0
+    assert len(store.rate_history(1, "dl1")[0]) == 0 and store.counts() == {}
+    assert store.reset_time is not None
+    # the last event is still displayed, and new data fill the plots again
+    assert "image" in store.event(1, (1, 1))["dl1"]
+    store.push_row("dl1", dl1_row(2))
+    assert store.statistics(1, "dl1")["n_rows"] == 1
