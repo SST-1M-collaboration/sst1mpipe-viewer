@@ -1,0 +1,23 @@
+# Statistics accumulated by the "DL2 Statistics" page, per telescope (same format as
+# dl1_statistics.yaml), for each combination of algorithms (chosen in the menus of the page).
+#
+# The columns are the generic DL2 fields of sst1mpipe_viewer.dl2 (the fields of the ctapipe
+# TelescopeReconstructedContainer of the chosen algorithms): energy (TeV), prediction (gammaness),
+# alt, az (deg), impact_distance (m), disp_parameter (deg), <group>_is_valid, ...
+
+hist1d:
+  - {column: energy, log_x: true, range: [0.01, 1000], bins: 50, unit: TeV, title: "reconstructed energy", log_y: true}
+  - {column: energy_uncert, log_x: true, range: [0.001, 1000], bins: 50, unit: TeV, title: "energy uncertainty"}
+  - {column: prediction, range: [0, 1], bins: 50, title: "gammaness (prediction)", log_y: true}
+  - {column: alt, range: [0, 90], bins: 90, unit: deg, title: "reconstructed altitude"}
+  - {column: az, range: [0, 360], bins: 72, unit: deg, title: "reconstructed azimuth"}
+  - {column: impact_distance, range: [0, 500], bins: 50, unit: m, title: "impact distance"}
+  - {column: disp_parameter, range: [-3, 3], bins: 60, unit: deg, title: "disp"}
+  - {column: energy_is_valid, range: [-0.5, 1.5], bins: 2, title: "energy is valid (0 / 1)"}
+  - {column: classification_is_valid, range: [-0.5, 1.5], bins: 2, title: "classification is valid (0 / 1)"}
+  - {column: geometry_is_valid, range: [-0.5, 1.5], bins: 2, title: "geometry is valid (0 / 1)"}
+
+hist2d:
+  - {x: energy, x_log: true, x_range: [0.01, 1000], x_bins: 50, y: prediction, y_range: [0, 1], y_bins: 40, title: "gammaness vs energy (TeV)"}
+  - {x: az, x_range: [0, 360], x_bins: 72, y: alt, y_range: [0, 90], y_bins: 45, title: "reconstructed direction (alt / az, deg)"}
+  - {x: energy, x_log: true, x_range: [0.01, 1000], x_bins: 50, y: impact_distance, y_range: [0, 500], y_bins: 50, title: "impact distance (m) vs energy (TeV)"}

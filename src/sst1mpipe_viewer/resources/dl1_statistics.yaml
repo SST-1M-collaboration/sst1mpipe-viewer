@@ -1,0 +1,27 @@
+# Statistics accumulated by the "DL1 Statistics" page, per telescope.
+#
+# hist1d:  {column, bins, range | edges, log_x (logarithmic bins), log_y, transform (abs, log10), unit, title}
+# hist2d:  {x, y, x_bins, x_range, x_log, y_bins, y_range, y_log, x_transform, y_transform, title}
+#
+# Every row received is accumulated: the selection of the events (cuts) is done by the pipeline.
+
+hist1d:
+  - {column: hillas_intensity, log_x: true, range: [1, 100000], bins: 50, unit: p.e., title: "intensity", log_y: true}
+  - {column: hillas_length, range: [0, 1.0], bins: 50, unit: deg}
+  - {column: hillas_width, range: [0, 0.4], bins: 50, unit: deg}
+  - {column: hillas_r, range: [0, 5], bins: 50, unit: deg}
+  - {column: hillas_phi, range: [-180, 180], bins: 72, unit: deg}
+  - {column: hillas_psi, range: [-90, 90], bins: 36, unit: deg}
+  - {column: hillas_skewness, range: [-3, 3], bins: 60}
+  - {column: hillas_kurtosis, range: [0, 10], bins: 50}
+  - {column: timing_slope, range: [-20, 20], bins: 40, unit: "ns / deg"}
+  - {column: leakage_intensity_width_2, range: [0, 1], bins: 50, log_y: true}
+  - {column: concentration_cog, range: [0, 1], bins: 50}
+  - {column: morphology_n_islands, range: [-0.5, 10.5], bins: 11, log_y: true}
+  - {column: morphology_n_pixels, range: [0, 100], bins: 50, log_y: true}
+  - {column: peak_time_mean, range: [0, 200], bins: 50, unit: ns}
+
+hist2d:
+  - {x: hillas_intensity, x_log: true, x_range: [10, 100000], x_bins: 40, y: hillas_length, y_range: [0, 1.0], y_bins: 40, title: "length vs intensity"}
+  - {x: hillas_intensity, x_log: true, x_range: [10, 100000], x_bins: 40, y: hillas_width, y_range: [0, 0.4], y_bins: 40, title: "width vs intensity"}
+  - {x: hillas_fov_lon, x_range: [-5, 5], x_bins: 50, y: hillas_fov_lat, y_range: [-5, 5], y_bins: 50, title: "centre of gravity (deg)"}
