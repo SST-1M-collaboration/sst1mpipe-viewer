@@ -141,6 +141,7 @@ class ImageEventPage(Page):
         displayed = data is not None and row_is_valid(self.kind, data)
         if not displayed and session.follow and view.shown and geometry is not None:
             # Live: the event displayed stays until another one can be displayed (no empty camera in between)
+            camera.set_selected(session.selected_pixels(tel_id))
             return
         set_event_label(view.event_label, key if displayed or not session.follow else None)
         view.table_rows = None if data is None else {

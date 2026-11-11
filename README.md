@@ -15,7 +15,7 @@ One web page per data level, linked by the navigation bar at the top:
 | `/selection` | **Selection** | **Selection of the telescopes** (check boxes) and **of the pixels by group**, one panel per telescope, of DigiCam (trigger patch, module, FADC board, CAN node, sector): a click on the camera of the groups selects all the pixels of a group, shift+click adds / removes a group, ids of groups can be entered (`0, 3-5`); neighbouring groups have different colors |
 | `/r0`, `/r1`, `/dl0` | **R0 / R1 / DL0** | Rate of the level in time; one block per selected telescope, with its own ◀ / ▶ (events of this telescope only) and its own **sample** slider, common to the waveform camera and the trigger traces: the camera at the selected sample of the waveforms, the waveforms of the selected pixels (their mean for more than 12 pixels: the 12 pixels of a module are all drawn), the camera of a per-pixel field chosen in a menu (the fields of the same shape, e.g. `pedestal`, `pixel_flags`, `pixel_status`, `selected_gain_channel`); for the R0 of DigiCam, dashed `pedestal` lines on the waveforms and the **trigger traces per trigger patch** (trace chosen in a menu, camera of the 432 triplets of pixels, traces of the patches of the selected pixels); the table of all the fields, one column per telescope |
 | `/dl1` | **DL1** | Rate of the level in time; per selected telescope (with its own ◀ / ▶): image, peak time or cleaning mask (menu) with the cleaning mask and the Hillas ellipse; the table of all the DL1 and trigger fields |
-| `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations (one plot per telescope), reset buttons (per plot, selected telescopes, all) |
+| `/dl1_statistics` | **DL1 Statistics** | Accumulated histograms of the DL1 parameters, superimposed with one color per telescope, correlations (one plot per telescope) |
 | `/dl2` | **DL2** | Rate of the level in time; per selected telescope: the DL1 image with the Hillas ellipse, and the table of **all the DL2 fields of the telescope** (every algorithm: geometry, energy, classification, impact, disp, with their uncertainties, validity and goodness of fit) |
 | `/dl2_statistics` | **DL2 Statistics** | Per telescope, **the algorithm of each group chosen in a menu** (geometry, energy, classification, impact, disp): reconstructed energy and its uncertainty, gammaness, altitude, azimuth, impact distance, disp, validity flags; gammaness vs energy, direction, impact vs energy |
 | `/dl2_stereo` | **DL2 Stereo** | The stereo reconstruction of the subarray (not per telescope): rate; the displayed stereo event with its own ◀ / ▶ (reconstructed core on the ground with the telescopes, those used ringed, and the table of all its fields); statistics of all the stereo events with the algorithm menus (energy, gammaness, direction, h_max, core map, ...) |
@@ -136,6 +136,9 @@ sst1mpipe-process -i tcp://camera-22:24593 ... --publish tcp://viewer-host:5562
 sst1mpipe-viewer --stereo tcp://*:5563                                   # stereo mode
 ```
 
+Without `-o`, `sst1mpipe-process` writes nothing to disk: the events are only processed and
+published.
+
 The full events (waveforms, images) are sent every second by the pipeline, the other events with
 their trigger, DL1 parameters and DL2 (the statistics and the rates have all the events). To test
 the viewer without the pipeline, `sst1mpipe-viewer-publish` publishes a file as the pipeline
@@ -154,6 +157,21 @@ telescopes of the files which are not in it are added.
 The viewer is at http://localhost:5006/ (`--port`, `--allow-websocket-origin host:port` to reach
 it from another machine). `sst1mpipe-viewer --help` lists the options (subarray, statistics
 configuration, refresh periods).
+
+### Reset of the plots
+
+A single **Reset all plots** button, in the header of every page, resets every plot of the viewer
+for everyone: the statistics of all the data levels and telescopes, the rates in time and the DL3
+data. The events stay displayed.
+
+The plots are also reset automatically **at sunset** at the site, so that a new night starts with
+empty plots. The sunset is computed with astropy from the system time, at the reference location
+of the subarray (the SST-1M site without subarray). `--sunset-reset auto` (default) does it with
+a live stream (ZMQ endpoint) only, `on` always, `off` never. The status line shows the time of
+the next reset.
+
+In Live mode, a camera keeps the event it shows until another one can be displayed: it is never
+emptied in between.
 
 ## Input of the viewer
 
@@ -304,6 +322,7 @@ axis of the entries. (`transform: log10` is still available to histogram the log
 | `dl2.py` | DL2: algorithms, groups of quantities and generic field names of the ctapipe `DL2Container` |
 | `rates.py` | Rates per minute with their statistical uncertainties |
 | `dl3.py` | DL3 event lists: reading of the FITS files, accumulated histograms, offsets to the target |
+| `sunset.py` | Time of the next sunset at the site (astropy, system time) and automatic reset of the plots |
 | `feeds.py`, `publish.py` | Reading of files (HDF5 tables, ctapipe `EventSource`) and of the ZMQ stream of the pipeline into a store; publishing a file as the pipeline (test tool) |
 | `app.py`, `server.py`, `cli.py` | Bokeh pages (header, navigation, state shared by the pages of a browser), server, command line |
 | `pages/` | One module per kind of page: `array.py`, `waveforms.py` (+ `trigger.py`), `events.py` (DL1 / DL2), `statistics.py`, `stereo.py` (DL2 Stereo), `dl3.py`, `pixel_selection.py` |

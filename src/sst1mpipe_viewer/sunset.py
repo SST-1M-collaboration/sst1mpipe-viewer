@@ -79,8 +79,8 @@ class SunsetReset:
     def __init__(self, store, location=None, clock=time.time):
         self.store = store
         if location is None:
-            subarray = store.subarray
-            location = subarray.reference_location if subarray is not None else SST1M_LOCATION
+            # a subarray may have no reference location (e.g. of simulations)
+            location = getattr(store.subarray, "reference_location", None) or SST1M_LOCATION
         self.location = location
         self.clock = clock
         self._stop = threading.Event()
