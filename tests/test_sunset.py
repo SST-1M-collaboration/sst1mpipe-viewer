@@ -63,3 +63,10 @@ def test_sunset_reset_thread():
         assert store.reset_time is not None
     finally:
         sunset_reset.stop()
+
+
+def test_sunset_reset_location_of_the_subarray(subarray):
+    """the site is the reference location of the subarray of the store, the SST-1M site without one"""
+    store = ViewerStore(subarray)
+    assert SunsetReset(store, clock=lambda: NOON).location == subarray.reference_location
+    assert SunsetReset(ViewerStore(), clock=lambda: NOON).location == SST1M_LOCATION

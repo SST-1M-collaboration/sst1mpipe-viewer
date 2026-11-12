@@ -9,12 +9,14 @@ reaches it, in a background thread.
 import logging
 import threading
 import time
+import warnings
 
 import astropy.units as u
 import numpy as np
 from astropy.coordinates import AltAz, EarthLocation, get_sun
 from astropy.time import Time
 from astropy.utils import iers
+from astropy.utils.exceptions import AstropyWarning
 
 __all__ = ["SST1M_LOCATION", "SUNSET_ALTITUDE", "next_sunset", "SunsetReset"]
 
@@ -46,8 +48,11 @@ def next_sunset(location=SST1M_LOCATION, now=None):
     """
     now = time.time() if now is None else float(now)
     times = now + np.arange(0.0, 2 * 86400.0 + _STEP, _STEP)
-    # the precision of the Earth rotation tables does not matter here: no download
-    with iers.conf.set_temp("auto_download", False), iers.conf.set_temp("auto_max_age", None):
+    # the precision of the Earth rotation tables does not matter here (seconds of the sunset): no
+    # download, and no warning for the times after the tables
+    with (iers.conf.set_temp("auto_download", False), iers.conf.set_temp("auto_max_age", None),
+          iers.conf.set_temp("iers_degraded_accuracy", "ignore"), warnings.catch_warnings()):
+        warnings.simplefilter("ignore", AstropyWarning)
         obstime = Time(times, format="unix")
         altitude = get_sun(obstime).transform_to(AltAz(obstime=obstime, location=location)).alt
     above = (altitude - SUNSET_ALTITUDE).to_value(u.deg)
@@ -80,7 +85,9 @@ class SunsetReset:
         self.store = store
         if location is None:
             # a subarray may have no reference location (e.g. of simulations)
-            location = getattr(store.subarray, "reference_location", None) or SST1M_LOCATION
+            location = getattr(store.subarray, "reference_location", None)
+            if location is None:
+                location = SST1M_LOCATION
         self.location = location
         self.clock = clock
         self._stop = threading.Event()
